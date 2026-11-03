@@ -4,8 +4,8 @@
 
 1. Go to the **Releases** page of this repository.
 2. Under the latest release, download the DMG for your Mac:
-   - **Apple Silicon** (M1/M2/M3/M4): `Toplix-Pro-1.0.0-arm64.dmg`
-   - **Intel** Macs: `Toplix-Pro-1.0.0-x64.dmg`
+   - **Apple Silicon** (M1/M2/M3/M4): `Toplix-Pro-1.1.0-arm64.dmg`
+   - **Intel** Macs: `Toplix-Pro-1.1.0-x64.dmg`
    - Not sure which Mac you have? Apple menu → About This Mac → look for "Chip".
 3. Double-click the DMG to open it.
 4. Drag the **Toplix Pro** icon onto the **Applications** folder shortcut.

@@ -46,6 +46,16 @@
       models: ['openai/gpt-6.1-sol', 'anthropic/claude-opus-5-5', 'google/gemini-3-pro', 'meta-llama/llama-4-maverick'],
       defaultModel: 'anthropic/claude-opus-5-5'
     },
+    glm: {
+      id: 'glm',
+      name: 'Zhipu AI — GLM',
+      desc: 'Zhipu (bigmodel.cn) key. GLM-4 family — the same models AI Forge uses.',
+      kind: 'openai-chat',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      keyHint: 'paste your key',
+      models: ['glm-4.6', 'glm-4.5', 'glm-4-flash', 'glm-4-plus'],
+      defaultModel: 'glm-4.6'
+    },
     custom: {
       id: 'custom',
       name: 'Custom — OpenAI-compatible',
@@ -68,6 +78,7 @@
       openai: { apiKey: '', model: 'gpt-6.1-sol', baseUrl: 'https://api.openai.com/v1' },
       anthropic: { apiKey: '', model: 'claude-sonnet-5-5', baseUrl: 'https://api.anthropic.com/v1' },
       openrouter: { apiKey: '', model: 'anthropic/claude-opus-5-5', baseUrl: 'https://openrouter.ai/api/v1' },
+      glm: { apiKey: '', model: 'glm-4.6', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
       custom: { apiKey: '', model: 'llama3.3', baseUrl: 'http://localhost:11434/v1' }
     }
   };
@@ -149,8 +160,8 @@
   (function initTheme() {
     var stored = null;
     stored = window.ToplixStore.get('toplex.theme');
-    // Toplix Pro is dark-first; stored preference wins
-    var theme = stored || 'dark';
+    // Toplix Pro is light-first (T3 Code style); stored preference wins
+    var theme = stored || 'light';
     document.documentElement.setAttribute('data-theme', theme);
     updateThemeLabel();
     updateThemeIcon();
@@ -183,13 +194,24 @@
   function renderChatList() {
     var list = $('#chat-list');
     list.innerHTML = '';
+    var query = ($('#chat-search') && $('#chat-search').value || '').toLowerCase();
+    var chats = state.chats.filter(function (c) {
+      return !query || c.title.toLowerCase().indexOf(query) !== -1 ||
+        c.messages.some(function (m) { return m.content.toLowerCase().indexOf(query) !== -1; });
+    });
     if (!state.chats.length) {
       var empty = el('p', 'chat-list-empty', 'No chats yet');
       empty.style.cssText = 'padding:12px;color:var(--color-text-faint);font-size:var(--text-sm);text-align:center;';
       list.appendChild(empty);
       return;
     }
-    state.chats.forEach(function (chat) {
+    if (query && !chats.length) {
+      var noMatch = el('p', '', 'No chats match "' + query + '"');
+      noMatch.style.cssText = 'padding:12px;color:var(--color-text-faint);font-size:var(--text-sm);text-align:center;';
+      list.appendChild(noMatch);
+      return;
+    }
+    chats.forEach(function (chat) {
       var item = el('button', 'chat-item' + (chat.id === state.activeChatId ? ' active' : ''));
       item.dataset.testid = 'item-chat-' + chat.id;
       item.setAttribute('aria-label', 'Open chat: ' + chat.title);
@@ -283,9 +305,11 @@
       var role = el('div', 'msg-role');
       role.appendChild(el('span', 'role-avatar', 'You'));
       wrap.appendChild(role);
+      var row = el('div', 'msg-user-row');
       var bubble = el('div', 'msg-user-bubble');
       bubble.textContent = msg.content;
-      wrap.appendChild(bubble);
+      row.appendChild(bubble);
+      wrap.appendChild(row);
     } else {
       var roleA = el('div', 'msg-role');
       roleA.appendChild(el('span', 'role-avatar', 'T'));
@@ -774,6 +798,11 @@
       cards.appendChild(card);
     });
 
+    document.querySelectorAll('.settings-tab').forEach(function (tab) {
+      var on = tab.classList.contains('active');
+      if (on) $('#settings-crumb').textContent = tab.textContent;
+    });
+    $('#setting-dark').checked = currentTheme() === 'dark';
     $('#setting-system').value = state.settings.systemPrompt;
     $('#setting-temp').value = state.settings.temperature;
     $('#temp-value').textContent = state.settings.temperature;
@@ -799,6 +828,8 @@
     state.settings.temperature = parseFloat($('#setting-temp').value);
     state.settings.sendOnEnter = $('#setting-enter').checked;
     state.settings.stream = $('#setting-stream').checked;
+    var wantDark = $('#setting-dark').checked;
+    if (wantDark !== (currentTheme() === 'dark')) toggleTheme();
     persist();
     closeSettings();
     updateModelUI();
@@ -836,6 +867,7 @@
     updateModelUI();
 
     $('#new-chat-btn').addEventListener('click', newChat);
+    $('#chat-search').addEventListener('input', renderChatList);
     $('#sidebar-collapse').addEventListener('click', function () { $('#app').classList.add('sidebar-hidden'); });
     $('#sidebar-expand').addEventListener('click', function () { $('#app').classList.remove('sidebar-hidden'); });
     $('#theme-toggle').addEventListener('click', toggleTheme);
@@ -904,6 +936,7 @@
         document.querySelectorAll('.settings-pane').forEach(function (pane) {
           pane.classList.toggle('active', pane.dataset.pane === tab.dataset.tab);
         });
+        $('#settings-crumb').textContent = tab.textContent;
       });
     });
 

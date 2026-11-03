@@ -24,8 +24,13 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build DMG (Apple Silicon + Intel)
-        run: npx electron-builder --mac dmg --publish never
+      - name: Build DMG (Apple Silicon)
+        run: npx electron-builder --mac dmg --arm64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Build DMG (Intel)
+        run: npx electron-builder --mac dmg --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
