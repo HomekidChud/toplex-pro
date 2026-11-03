@@ -29,10 +29,16 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      - name: Ad-hoc codesign arm64 app
+        run: codesign --force --deep --sign - "dist/mac-arm64/Toplix Pro.app" || true
+
       - name: Build DMG (Intel)
         run: npx electron-builder --mac dmg --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Ad-hoc codesign x64 app
+        run: codesign --force --deep --sign - "dist/mac-x64/Toplix Pro.app" || true
 
       - name: Determine version
         id: ver
@@ -48,8 +54,16 @@ jobs:
             --title "Toplix Pro ${VERSION}" \
             --notes "Toplix Pro ${VERSION} for macOS.
 
+          ## What's new
+          - MCP support: connect Model Context Protocol servers (streamable HTTP) and the model can call their tools.
+          - ChatGPT connector: sign in from chatgpt.com via a magic link, Toplix Pro receives the token automatically.
+          - Redesigned Settings: General / Models / Connectors tabs.
+          - Unsigned-app 'damaged' error fixed: builds are now ad-hoc codesigned.
+
           ## Install
           1. Download Toplix-Pro-${VERSION}-arm64.dmg (Apple Silicon) or Toplix-Pro-${VERSION}-x64.dmg (Intel).
           2. Open the DMG and drag Toplix Pro to Applications.
-          3. The app is unsigned: on first launch right-click the app and choose Open, then confirm. See INSTALL.md for details." \
+          3. If macOS says the app is 'damaged', run in Terminal:
+             xattr -dr com.apple.quarantine '/Applications/Toplix Pro.app'
+             See INSTALL.md for details." \
             || gh release upload "$TAG" dist/*.dmg --clobber

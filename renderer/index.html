@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light dark" />
   <title>Toplix Pro</title>
-  <meta name="description" content="Toplix Pro — a fast, focused AI coding assistant for macOS. Connect ChatGPT, Codex, Claude and more." />
+  <meta name="description" content="Toplix Pro — a fast, focused AI coding assistant for macOS. Connect ChatGPT, Codex, Claude, MCP tools and more." />
   <link rel="icon" type="image/png" href="icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -91,6 +91,18 @@
         </div>
       </template>
 
+      <!-- Tool-use card template -->
+      <template id="tool-card-tpl">
+        <div class="tool-card">
+          <div class="tool-card-head">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a5 5 0 0 0-7 7l-4 4a2 2 0 1 0 3 3l4-4a5 5 0 0 0 7-7l-2.8 2.8a2 2 0 1 1-3-3L14.7 6.3z"/></svg>
+            <span class="tool-card-title"></span>
+            <button class="tool-card-toggle" type="button">Details</button>
+          </div>
+          <pre class="tool-card-body"></pre>
+        </div>
+      </template>
+
       <!-- Composer -->
       <div class="composer-wrap">
         <div class="composer" id="composer">
@@ -124,9 +136,9 @@
   <div class="modal-overlay" id="settings-overlay" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" data-testid="modal-settings">
       <div class="modal-head">
-        <h2 id="settings-title">Settings <span class="crumb">/ <b id="settings-crumb">Models & API keys</b></span></h2>
-        <div class="modal-foot-right">
-          <button class="btn ghost" id="settings-reset">Reset app data</button>
+        <h2 id="settings-title">Settings <span class="crumb">/ <b id="settings-crumb">Models & keys</b></span></h2>
+        <div class="modal-head-actions">
+          <button class="btn ghost" id="settings-reset">Reset</button>
           <button class="icon-btn" id="settings-close" aria-label="Close settings">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
@@ -134,30 +146,81 @@
       </div>
 
       <nav class="settings-nav" role="tablist" aria-label="Settings sections">
-        <button class="settings-tab active" data-tab="models" role="tab" aria-selected="true" data-testid="tab-models">Models & keys</button>
-        <button class="settings-tab" data-tab="behavior" role="tab" aria-selected="false" data-testid="tab-behavior">Behavior</button>
-        <button class="settings-tab" data-tab="appearance" role="tab" aria-selected="false" data-testid="tab-appearance">Appearance</button>
-        <button class="settings-tab" data-tab="about" role="tab" aria-selected="false" data-testid="tab-about">About</button>
+        <button class="settings-tab active" data-tab="models" role="tab" aria-selected="true" data-testid="tab-models">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 10l-.75-.07A4.001 4.001 0 0 1 8 6a4 4 0 0 1 4-4z"/><path d="M5 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"/><path d="M19 8a2 2 0 0 1 2 2c0 1.1-.9 2-2 2"/></svg>
+          Models & keys
+        </button>
+        <button class="settings-tab" data-tab="connectors" role="tab" aria-selected="false" data-testid="tab-connectors">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
+          Connectors
+        </button>
+        <button class="settings-tab" data-tab="behavior" role="tab" aria-selected="false" data-testid="tab-behavior">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="4"/></svg>
+          Behavior
+        </button>
+        <button class="settings-tab" data-tab="appearance" role="tab" aria-selected="false" data-testid="tab-appearance">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="17" cy="15" r="2.5"/><path d="M12 2a10 10 0 1 0 10 10"/></svg>
+          Appearance
+        </button>
+        <button class="settings-tab" data-tab="about" role="tab" aria-selected="false" data-testid="tab-about">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          About
+        </button>
       </nav>
 
       <div class="modal-body">
         <!-- Models & keys -->
         <section class="settings-pane active" data-pane="models">
-          <p class="settings-intro">Connect one or more providers, exactly like AI Forge: keys are stored only on your Mac and sent directly to the provider you pick. Switch models anytime from the pill in the composer.</p>
+          <p class="settings-intro">Connect one or more providers. Keys are stored only on your Mac and sent directly to the provider you pick. Switch models anytime from the pill in the composer.</p>
 
           <div class="provider-cards" id="provider-cards"><!-- built by JS --></div>
 
           <div class="card-group">
             <div class="card-group-title">Prompting</div>
             <div class="card">
+              <div class="card-row" style="display:block">
+                <div class="card-row-title" style="margin-bottom:var(--space-2)">System prompt</div>
+                <div class="card-row-sub" style="margin-bottom:var(--space-2)">Sent with every request. Guides tone and behavior.</div>
+                <textarea id="setting-system" rows="3" placeholder="You are a senior software engineer. Be concise and correct."></textarea>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Connectors -->
+        <section class="settings-pane" data-pane="connectors">
+          <p class="settings-intro">Connect your ChatGPT account with a magic-link sign-in, and plug in MCP tool servers the model can use.</p>
+
+          <div class="card-group">
+            <div class="card-group-title">ChatGPT account</div>
+            <div class="card">
               <div class="card-row">
                 <div class="card-row-text">
-                  <div class="card-row-title">System prompt</div>
-                  <div class="card-row-sub">Sent with every request. Guides tone and behavior.</div>
+                  <div class="card-row-title">Sign in with ChatGPT</div>
+                  <div class="card-row-sub" id="chatgpt-auth-status">Not signed in — or paste an OpenAI API key on the Models tab.</div>
                 </div>
+                <button class="btn primary" id="chatgpt-signin">Sign in</button>
               </div>
               <div class="card-row" style="display:block">
-                <textarea id="setting-system" rows="3" placeholder="You are a senior software engineer. Be concise and correct."></textarea>
+                <div class="card-row-title" style="margin-bottom:var(--space-2)">Auth endpoint</div>
+                <div class="card-row-sub" style="margin-bottom:var(--space-2)">Opens this page in your browser. After you approve, the browser redirects back to Toplix Pro and the token is saved automatically.</div>
+                <input type="text" id="chatgpt-auth-url" placeholder="https://chatgpt.com/oauth/authorize?…" />
+              </div>
+            </div>
+          </div>
+
+          <div class="card-group">
+            <div class="card-group-title">MCP tool servers</div>
+            <div class="card">
+              <div class="card-row" style="display:block">
+                <div class="card-row-sub">Give the model real tools — filesystem, GitHub, browser automation, anything that speaks MCP (streamable HTTP).</div>
+              </div>
+              <div id="mcp-server-list"><!-- built by JS --></div>
+              <div class="card-row mcp-add-row">
+                <input type="text" id="mcp-add-name" placeholder="Name (e.g. GitHub)" />
+                <input type="text" id="mcp-add-url" placeholder="https://example.com/mcp" />
+                <input type="text" id="mcp-add-key" placeholder="Bearer token (optional)" />
+                <button class="btn ghost" id="mcp-add-btn">Add</button>
               </div>
             </div>
           </div>
@@ -221,7 +284,7 @@
         <section class="settings-pane" data-pane="about">
           <div class="about-block">
             <div class="brand about-brand"><span class="brand-mark" aria-hidden="true">T</span><span class="brand-name">Toplix <em>Pro</em></span></div>
-            <p>Version 1.1.0 · macOS 13+</p>
+            <p>Version 1.2.0 · macOS 13+</p>
             <p>A focused AI coding assistant built with Electron, in the spirit of T3 Code. Your chats and API keys never leave your machine.</p>
             <p class="about-license">© 2026 HomekidChud. All rights reserved. See LICENSE for terms.</p>
           </div>
@@ -229,7 +292,7 @@
       </div>
 
       <div class="modal-foot">
-        <span style="font-size:var(--text-xs);color:var(--color-text-faint)">Keys stay on your Mac</span>
+        <span style="font-size:var(--text-xs);color:var(--color-text-faint)">Keys and tokens stay on your Mac</span>
         <div class="modal-foot-right">
           <button class="btn ghost" id="settings-cancel">Cancel</button>
           <button class="btn primary" id="settings-save" data-testid="button-save-settings">Save</button>
@@ -241,6 +304,7 @@
   <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
 
   <script src="markdown.js"></script>
+  <script src="mcp.js"></script>
   <script src="storage-shim.js"></script>
   <script src="app.js"></script>
 </body>

@@ -74,6 +74,8 @@
     temperature: 0.7,
     sendOnEnter: true,
     stream: true,
+    mcpServers: [],
+    chatgptAuthUrl: '',
     providers: {
       openai: { apiKey: '', model: 'gpt-6.1-sol', baseUrl: 'https://api.openai.com/v1' },
       anthropic: { apiKey: '', model: 'claude-sonnet-5-5', baseUrl: 'https://api.anthropic.com/v1' },
@@ -89,7 +91,9 @@
     chats: loadChats(),
     activeChatId: null,
     generating: false,
-    abort: null
+    abort: null,
+    mcpTools: {},   // serverId -> tool list
+    mcpStatus: {}   // serverId -> connect result
   };
 
   function loadSettings() {
@@ -151,6 +155,8 @@
 
   /* ---------------- Toasts ---------------- */
   function toast(message, isError) {
+    var last = $('#toast-stack').lastElementChild;
+    if (last && last.textContent === message) return; // skip duplicate back-to-back toasts
     var t = el('div', 'toast' + (isError ? ' error' : ''), message);
     $('#toast-stack').appendChild(t);
     setTimeout(function () { t.remove(); }, 3200);
@@ -320,8 +326,15 @@
         wrap.appendChild(el('div', 'msg-error', msg.content));
       } else {
         var body = el('div', 'msg-body');
-        body.innerHTML = window.ToplixMarkdown.render(msg.content);
-        wireCopyButtons(body);
+        (msg.toolUses || []).forEach(function (t) {
+          var prettyName = (t.rawName || t.name || '').replace(/^toplx_[a-z0-9]+_/i, '');
+          body.appendChild(makeToolCard('Used ' + prettyName,
+            'Arguments:\n' + JSON.stringify(t.args, null, 2) + '\n\nResult:\n' + t.result));
+        });
+        var md = el('div', 'msg-md');
+        md.innerHTML = window.ToplixMarkdown.render(msg.content);
+        wireCopyButtons(md);
+        body.appendChild(md);
         wrap.appendChild(body);
 
         var actions = el('div', 'msg-actions');
@@ -488,6 +501,12 @@
 
     if (!connected) {
       demoGenerate(msg, bodyEl, chat);
+      return;
+    }
+
+    // MCP tools connected: run the tool-calling loop (non-streaming rounds)
+    if (activeToolDefs().length) {
+      toolLoopGenerate(chat, msg, bodyEl);
       return;
     }
 
@@ -720,6 +739,314 @@
     });
   }
 
+
+  /* ---------------- MCP tools ---------------- */
+  function enabledMcpServers() {
+    return (state.settings.mcpServers || []).filter(function (s) { return s.enabled !== false; });
+  }
+
+  async function refreshMcpTools() {
+    var servers = enabledMcpServers();
+    state.mcpTools = {};
+    state.mcpStatus = {};
+    for (var i = 0; i < servers.length; i++) {
+      var s = servers[i];
+      var res = await window.ToplixMCP.connect(s);
+      state.mcpStatus[s.id] = res;
+      if (res.ok) state.mcpTools[s.id] = res.tools;
+    }
+    // refresh status text if settings modal is open
+    if (!$('#settings-overlay').hidden && document.querySelector('[data-pane="connectors"]').classList.contains('active')) {
+      renderMcpSettings();
+    }
+  }
+
+  function activeToolDefs() {
+    return window.ToplixMCP.toolDefs(enabledMcpServers(), state.mcpTools);
+  }
+
+  function serverById(id) {
+    return (state.settings.mcpServers || []).find(function (s) { return s.id === id; });
+  }
+
+  function makeToolCard(title, bodyText) {
+    var tpl = document.getElementById('tool-card-tpl');
+    var card = tpl.content.firstElementChild.cloneNode(true);
+    card.querySelector('.tool-card-title').textContent = title;
+    card.querySelector('.tool-card-body').textContent = bodyText;
+    card.querySelector('.tool-card-toggle').addEventListener('click', function () {
+      card.classList.toggle('open');
+      card.querySelector('.tool-card-toggle').textContent = card.classList.contains('open') ? 'Hide' : 'Details';
+    });
+    return card;
+  }
+
+  /* Non-streaming request WITH tools; returns {text, toolCalls:[{name, rawName, server, args, callId}]} */
+  async function requestWithTools(p, cfg, history, defs) {
+    if (p.kind === 'openai-responses') return openaiResponsesTools(p, cfg, history, defs);
+    if (p.kind === 'anthropic') return anthropicTools(p, cfg, history, defs);
+    return openaiChatTools(p, cfg, history, defs);
+  }
+
+  async function openaiResponsesTools(p, cfg, history, defs) {
+    var input = history.map(function (m) {
+      return { role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content };
+    });
+    if (state.settings.systemPrompt) input.unshift({ role: 'system', content: state.settings.systemPrompt });
+    var res = await fetch(cfg.baseUrl + '/responses', {
+      method: 'POST', signal: state.abort.signal,
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey },
+      body: JSON.stringify({
+        model: cfg.model, input: input,
+        tools: defs.map(function (d) {
+          return { type: 'function', name: d.name, description: d.description, parameters: d.input_schema, strict: false };
+        })
+      })
+    });
+    await assertOk(res);
+    var data = await res.json();
+    var toolCalls = [];
+    var text = '';
+    (data.output || []).forEach(function (item) {
+      if (item.type === 'function_call') {
+        var def = defs.find(function (d) { return d.name === item.name; });
+        var args = {};
+        try { args = JSON.parse(item.arguments || '{}'); } catch (e) {}
+        toolCalls.push({
+          name: item.name, rawName: def ? def._tool : item.name,
+          server: def ? serverById(def._server) : null,
+          args: args, callId: item.call_id, kind: 'responses'
+        });
+      }
+      if (item.type === 'message') {
+        (item.content || []).forEach(function (c) { if (c.text) text += c.text; });
+      }
+    });
+    return { text: text, toolCalls: toolCalls };
+  }
+
+  async function anthropicTools(p, cfg, history, defs) {
+    var messages = history.filter(function (m) { return m.role !== 'system' && !m._raw; });
+    var res = await fetch(cfg.baseUrl + '/messages', {
+      method: 'POST', signal: state.abort.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': cfg.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        system: state.settings.systemPrompt || undefined,
+        messages: messages,
+        max_tokens: 8192,
+        temperature: Math.min(1, state.settings.temperature),
+        tools: defs.map(function (d) {
+          return { name: d.name, description: d.description, input_schema: d.input_schema };
+        })
+      })
+    });
+    await assertOk(res);
+    var data = await res.json();
+    var toolCalls = [];
+    var text = '';
+    (data.content || []).forEach(function (block) {
+      if (block.type === 'tool_use') {
+        var def = defs.find(function (d) { return d.name === block.name; });
+        toolCalls.push({
+          name: block.name, rawName: def ? def._tool : block.name,
+          server: def ? serverById(def._server) : null,
+          args: block.input || {}, callId: block.id, kind: 'anthropic'
+        });
+      }
+      if (block.type === 'text') text += block.text;
+    });
+    return { text: text, toolCalls: toolCalls };
+  }
+
+  async function openaiChatTools(p, cfg, history, defs) {
+    var messages = history.map(function (m) { return { role: m.role, content: m.content }; });
+    if (state.settings.systemPrompt) messages.unshift({ role: 'system', content: state.settings.systemPrompt });
+    var res = await fetch(cfg.baseUrl + '/chat/completions', {
+      method: 'POST', signal: state.abort.signal,
+      headers: Object.assign(
+        { 'Content-Type': 'application/json' },
+        cfg.apiKey ? { 'Authorization': 'Bearer ' + cfg.apiKey } : {},
+        p.id === 'openrouter' ? { 'HTTP-Referer': 'https://toplex.pro', 'X-Title': 'Toplix Pro' } : {}
+      ),
+      body: JSON.stringify({
+        model: cfg.model, messages: messages,
+        temperature: state.settings.temperature,
+        tools: defs.map(function (d) {
+          return { type: 'function', function: { name: d.name, description: d.description, parameters: d.input_schema } };
+        })
+      })
+    });
+    await assertOk(res);
+    var data = await res.json();
+    var m = data.choices && data.choices[0] && data.choices[0].message;
+    var toolCalls = [];
+    ((m && m.tool_calls) || []).forEach(function (tc) {
+      var def = defs.find(function (d) { return d.name === tc.function.name; });
+      var args = {};
+      try { args = JSON.parse(tc.function.arguments || '{}'); } catch (e) {}
+      toolCalls.push({
+        name: tc.function.name, rawName: def ? def._tool : tc.function.name,
+        server: def ? serverById(def._server) : null,
+        args: args, callId: tc.id, kind: 'chat'
+      });
+    });
+    return { text: (m && m.content) || '', toolCalls: toolCalls };
+  }
+
+  function appendToolResultToHistory(history, call, resultText) {
+    if (call.kind === 'responses') {
+      history.push({ type: 'function_call', call_id: call.callId, name: call.name, arguments: JSON.stringify(call.args) });
+      history.push({ type: 'function_call_output', call_id: call.callId, output: resultText });
+    } else if (call.kind === 'anthropic') {
+      history.push({ role: 'assistant', content: [{ type: 'tool_use', id: call.callId, name: call.name, input: call.args }] });
+      history.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: call.callId, content: resultText }] });
+    } else {
+      history.push({ role: 'assistant', content: null, tool_calls: [{ id: call.callId, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } }] });
+      history.push({ role: 'tool', tool_call_id: call.callId, content: resultText });
+    }
+  }
+
+  async function toolLoopGenerate(chat, msg, bodyEl) {
+    try {
+      var p = activeProvider();
+      var cfg = providerConfig();
+      var defs = activeToolDefs();
+      var history = chat.messages
+        .filter(function (m) { return !m.error; })
+        .map(function (m) { return { role: m.role, content: m.content }; })
+        .slice(0, -1);
+      var rounds = 0, maxRounds = 6;
+      while (rounds < maxRounds) {
+        rounds++;
+        bodyEl.innerHTML = window.ToplixMarkdown.render('_(using connected tools)_');
+        var res = await requestWithTools(p, cfg, history, defs);
+        if (!res.toolCalls.length) {
+          msg.content = res.text || '*(empty response)*';
+          break;
+        }
+        for (var i = 0; i < res.toolCalls.length; i++) {
+          var c = res.toolCalls[i];
+          msg.toolUses = msg.toolUses || [];
+          var card = makeToolCard('Using ' + c.rawName, 'Arguments:\n' + JSON.stringify(c.args, null, 2) + '\n\nRunning…');
+          bodyEl.innerHTML = '';
+          bodyEl.appendChild(card);
+          scrollMessages();
+          var resultText;
+          try {
+            var tr = c.server
+              ? await window.ToplixMCP.callTool(c.server, c.rawName, c.args)
+              : { content: [{ type: 'text', text: '(tool server unavailable)' }], isError: true };
+            resultText = window.ToplixMCP.resultToText(tr);
+            if (tr && tr.isError) resultText = 'Tool error: ' + resultText;
+          } catch (e) {
+            resultText = 'Tool error: ' + e.message;
+          }
+          msg.toolUses.push({ name: c.name, rawName: c.rawName, args: c.args, result: resultText });
+          card.querySelector('.tool-card-body').textContent = 'Arguments:\n' + JSON.stringify(c.args, null, 2) + '\n\nResult:\n' + resultText;
+          appendToolResultToHistory(history, c, resultText);
+        }
+      }
+      if (rounds >= maxRounds && !msg.content) msg.content = '*(stopped — too many tool rounds)*';
+      finishGenerate(chat, msg, bodyEl, null);
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        msg.content += '\n\n*(stopped)*';
+        finishGenerate(chat, msg, bodyEl, null);
+      } else {
+        finishGenerate(chat, msg, bodyEl, err);
+      }
+    }
+  }
+
+  /* ---------------- ChatGPT magic link ---------------- */
+  function startChatGptAuth() {
+    var base = ($('#chatgpt-auth-url').value || '').trim() || 'https://chatgpt.com/oauth/authorize';
+    var url = base;
+    try {
+      var u = new URL(base);
+      if (!u.searchParams.has('redirect_uri')) u.searchParams.set('redirect_uri', 'toplex://auth/callback');
+      if (!u.searchParams.has('response_type')) u.searchParams.set('response_type', 'code');
+      url = u.toString();
+    } catch (e) { /* use raw */ }
+    if (window.toplex && window.toplex.openMagicLink) {
+      window.toplex.openMagicLink(url)
+        .then(function () { toast('Browser opened — finish signing in, then Toplix Pro picks up the token'); })
+        .catch(function (e) { toast(e.message, true); });
+    } else {
+      window.open(url, '_blank');
+      toast('Browser opened — the desktop app receives the token automatically');
+    }
+  }
+
+  function handleAuthCallback(url) {
+    try {
+      var qs = '';
+      if (url.indexOf('?') !== -1) qs += url.slice(url.indexOf('?') + 1);
+      if (url.indexOf('#') !== -1) qs += '&' + url.slice(url.indexOf('#') + 1);
+      var params = new URLSearchParams(qs);
+      var token = params.get('access_token') || params.get('token') || params.get('api_key') || params.get('code');
+      if (!token) { toast('Sign-in callback contained no token', true); return; }
+      state.settings.providers.openai.apiKey = token;
+      state.settings.providers.openai.authMethod = 'chatgpt';
+      persist();
+      updateModelUI();
+      $('#chatgpt-auth-status').textContent = 'Signed in with ChatGPT — token saved';
+      toast('ChatGPT account connected');
+    } catch (e) {
+      toast('Could not read the sign-in callback', true);
+    }
+  }
+
+  /* ---------------- MCP settings UI ---------------- */
+  function renderMcpSettings() {
+    var list = $('#mcp-server-list');
+    list.innerHTML = '';
+    (state.settings.mcpServers || []).forEach(function (s) {
+      var row = el('div', 'mcp-server-row');
+      var icon = el('div', 'mcp-server-icon');
+      icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
+      var meta = el('div', 'mcp-server-meta');
+      meta.appendChild(el('div', 'mcp-server-name', s.name));
+      var urlEl = el('div', 'mcp-server-url', s.url);
+      meta.appendChild(urlEl);
+      var status = el('div', 'mcp-server-status');
+      var st = state.mcpStatus[s.id];
+      if (st && st.ok) {
+        status.className = 'mcp-server-status on';
+        status.textContent = st.tools.length === 1 ? '1 tool' : st.tools.length + ' tools';
+      } else if (st && st.error) {
+        status.className = 'mcp-server-status err';
+        status.textContent = 'Error';
+        status.title = st.error;
+      } else {
+        status.textContent = 'Not connected';
+      }
+      var remove = el('button', 'icon-btn mcp-server-remove');
+      remove.setAttribute('aria-label', 'Remove server');
+      remove.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+      remove.addEventListener('click', function () {
+        state.settings.mcpServers = (state.settings.mcpServers || []).filter(function (x) { return x.id !== s.id; });
+        persist();
+        renderMcpSettings();
+        refreshMcpTools();
+        toast('MCP server removed');
+      });
+      row.appendChild(icon); row.appendChild(meta); row.appendChild(status); row.appendChild(remove);
+      list.appendChild(row);
+    });
+    if (!(state.settings.mcpServers || []).length) {
+      var empty = el('p', '', 'No MCP servers yet — add one below.');
+      empty.style.cssText = 'padding:4px 16px;color:var(--color-text-faint);font-size:var(--text-sm)';
+      list.appendChild(empty);
+    }
+  }
+
   /* ---------------- Settings modal ---------------- */
   function openSettings() {
     // build provider cards
@@ -803,6 +1130,12 @@
       if (on) $('#settings-crumb').textContent = tab.textContent;
     });
     $('#setting-dark').checked = currentTheme() === 'dark';
+    $('#chatgpt-auth-url').value = state.settings.chatgptAuthUrl || '';
+    var openaiCfg = state.settings.providers.openai;
+    $('#chatgpt-auth-status').textContent = openaiCfg.authMethod === 'chatgpt'
+      ? 'Signed in with ChatGPT — token saved'
+      : (openaiCfg.apiKey ? 'API key set on the Models tab' : 'Not signed in — or paste an OpenAI API key on the Models tab.');
+    renderMcpSettings();
     $('#setting-system').value = state.settings.systemPrompt;
     $('#setting-temp').value = state.settings.temperature;
     $('#temp-value').textContent = state.settings.temperature;
@@ -830,7 +1163,9 @@
     state.settings.stream = $('#setting-stream').checked;
     var wantDark = $('#setting-dark').checked;
     if (wantDark !== (currentTheme() === 'dark')) toggleTheme();
+    state.settings.chatgptAuthUrl = ($('#chatgpt-auth-url').value || '').trim();
     persist();
+    refreshMcpTools();
     closeSettings();
     updateModelUI();
     renderModelMenu();
@@ -943,6 +1278,30 @@
     $('#setting-temp').addEventListener('input', function (e) {
       $('#temp-value').textContent = e.target.value;
     });
+
+    // ChatGPT magic link
+    $('#chatgpt-signin').addEventListener('click', startChatGptAuth);
+    if (window.toplex && window.toplex.onAuthCallback) {
+      window.toplex.onAuthCallback(handleAuthCallback);
+    }
+
+    // MCP server management
+    $('#mcp-add-btn').addEventListener('click', function () {
+      var name = $('#mcp-add-name').value.trim() || 'Server';
+      var url = $('#mcp-add-url').value.trim();
+      if (!/^https?:\/\//.test(url)) { toast('Enter a valid http(s) MCP URL', true); return; }
+      var apiKey = $('#mcp-add-key').value.trim();
+      if (!state.settings.mcpServers) state.settings.mcpServers = [];
+      state.settings.mcpServers.push({ id: uid(), name: name, url: url, apiKey: apiKey });
+      $('#mcp-add-name').value = ''; $('#mcp-add-url').value = ''; $('#mcp-add-key').value = '';
+      persist();
+      renderMcpSettings();
+      refreshMcpTools();
+      toast('MCP server added');
+    });
+
+    // Connect MCP servers on launch
+    refreshMcpTools();
 
     // Shorter composer placeholder on narrow screens
     if (window.innerWidth < 780) $('#composer-input').placeholder = 'Ask Toplix to code…';

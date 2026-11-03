@@ -4,8 +4,8 @@
 
 1. Go to the **Releases** page of this repository.
 2. Under the latest release, download the DMG for your Mac:
-   - **Apple Silicon** (M1/M2/M3/M4): `Toplix-Pro-1.1.0-arm64.dmg`
-   - **Intel** Macs: `Toplix-Pro-1.1.0-x64.dmg`
+   - **Apple Silicon** (M1/M2/M3/M4): `Toplix-Pro-1.2.0-arm64.dmg`
+   - **Intel** Macs: `Toplix-Pro-1.2.0-x64.dmg`
    - Not sure which Mac you have? Apple menu → About This Mac → look for "Chip".
 3. Double-click the DMG to open it.
 4. Drag the **Toplix Pro** icon onto the **Applications** folder shortcut.
@@ -31,6 +31,22 @@ Toplix Pro is not distributed through the App Store and is not signed with an Ap
 
 > Why this happens: unsigned apps trigger Gatekeeper on first run. The right-click → Open flow is Apple's official way to approve an app you trust. Toplix Pro makes no background connections — it only talks to the AI providers you configure.
 
+## If macOS says "Toplix Pro is damaged and can't be opened"
+
+This happens on macOS 13+ when an app has no code signature at all (macOS calls every fully-unsigned app "damaged"). Releases from **v1.2.0** onward are ad-hoc codesigned, so this should not appear anymore. If it still does, remove the quarantine flag:
+
+1. Open **Terminal** (⌘Space, type Terminal, Enter).
+2. Paste this line and press Enter:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Toplix Pro.app"
+```
+
+3. If it asks for your password, type it (nothing shows as you type) and press Enter.
+4. Open Toplix Pro normally.
+
+This command only removes the "downloaded from the internet" flag Apple attached to the file — it changes nothing else on your Mac. (If the app shows this immediately after installing an older release, the fastest fix is downloading v1.2.0 or later.)
+
 ## Set up your models
 
 1. Open Toplix Pro (⌘, opens Settings, or click the gear icon).
@@ -43,6 +59,20 @@ Toplix Pro is not distributed through the App Store and is not signed with an Ap
 4. Type a message and press Enter.
 
 Keys are stored only on your Mac and sent directly to the provider — nothing passes through any other server. Without a key the app runs in demo mode with simulated responses.
+
+### Connect your ChatGPT account (magic link)
+
+1. Open Settings → **Connectors**.
+2. Click **Sign in with ChatGPT** — your browser opens the ChatGPT sign-in page.
+3. Finish signing in on chatgpt.com. After the redirect, Toplix Pro receives the token automatically and the status turns green.
+4. No ChatGPT API key? Paste an OpenAI key on the **Models** tab instead — same models.
+
+### Add MCP servers
+
+1. Open Settings → **Connectors**.
+2. Under **MCP servers**, enter a name and the server URL (streamable HTTP, e.g. `https://example.com/mcp`) and click **Add**.
+3. The status column shows how many tools the server offers. The model now sees those tools automatically and can call them while answering — each tool call appears as a collapsible card in the chat.
+4. Paste a bearer token in the optional field if the server requires one.
 
 ## Option 2: Build the DMG yourself
 
@@ -70,6 +100,9 @@ npm start
 | Problem | Fix |
 | --- | --- |
 | "App can't be opened because it's from an unidentified developer" | Right-click the app → Open → Open (see Gatekeeper section above). |
+| "'Toplix Pro' is damaged and can't be opened. You should move it to the Bin." | Download v1.2.0+, or run the `xattr` command in the "damaged app" section above. |
+| ChatGPT sign-in finished but nothing happened | The browser must be the default one on this Mac — the token is passed back via the `toplex://` link. Retry, or paste an OpenAI key on the Models tab. |
+| MCP server shows "Error" | Check the URL is a streamable HTTP MCP endpoint (not SSE-only), the bearer token is valid, and the server is reachable. |
 | Nothing happens when I send a message | Check Settings → the right API key is set and the model name is valid for that provider. |
 | "HTTP 401" | API key is missing or invalid. |
 | "HTTP 404" | Model name or base URL is wrong for that provider. |

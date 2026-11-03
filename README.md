@@ -7,6 +7,8 @@ A fast, focused AI coding assistant for macOS — inspired by the best parts of 
 ## Features
 
 - **Multi-provider models** — connect OpenAI (ChatGPT & Codex models), Anthropic (Claude), OpenRouter, or any OpenAI-compatible endpoint (Ollama, LM Studio, Groq…)
+- **MCP tool servers** — connect Model Context Protocol servers (streamable HTTP) and the model can call their tools mid-conversation, with collapsible tool cards in the chat
+- **ChatGPT magic-link sign-in** — sign in from chatgpt.com in your browser; Toplix Pro receives the token automatically via its custom URL scheme
 - **Streaming responses** with markdown rendering, syntax-highlighted code blocks and one-click copy
 - **Chat history** with a searchable sidebar, stored locally
 - **Dark & light themes**, keyboard shortcuts (⌘N new chat, ⌘, settings, Esc stop)
