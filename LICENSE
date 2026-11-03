@@ -1,0 +1,42 @@
+Toplix Pro Proprietary License
+Copyright (c) 2026 HomekidChud. All rights reserved.
+
+1. Ownership. Toplix Pro and its entire source code, documentation, artwork,
+   icons, and design (the "Software") are the exclusive property of the
+   copyright holder. Nothing in this License transfers ownership of the
+   Software or any intellectual property rights in it to you.
+
+2. No license to copy or redistribute. No part of the Software may be copied,
+   reproduced, distributed, republished, uploaded, posted, transmitted, sold,
+   sublicensed, or made available to third parties in any form or by any
+   means, electronic or mechanical, without the prior written permission of
+   the copyright holder.
+
+3. No derivative works. You may not modify, adapt, translate, decompile,
+   reverse-engineer, disassemble, or create derivative works based on the
+   Software, in whole or in part.
+
+4. No trademark use. The names "Toplix Pro", "Toplix", and all related marks
+   and logos may not be used to endorse or promote products derived from or
+   associated with the Software without written permission.
+
+5. Personal use. The copyright holder may, at their sole discretion, permit
+   individuals to download and run compiled releases of the Software for
+   personal, non-commercial use. Such permission does not include any right
+   to the source code beyond running the distributed application.
+
+6. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+   KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+   NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR
+   OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+   DEALINGS IN THE SOFTWARE.
+
+7. Third-party services. The Software can connect to third-party AI
+   providers (such as OpenAI, Anthropic, and OpenRouter). Those services are
+   governed by their own terms; the copyright holder is not responsible for
+   their content, pricing, or availability.
+
+For licensing inquiries, contact the repository owner via GitHub:
+https://github.com/HomekidChud

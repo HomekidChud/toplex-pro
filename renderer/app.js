@@ -1,0 +1,928 @@
+/* Toplix Pro — app.js
+ * Chat logic, provider settings, streaming, and UI wiring.
+ * Runs both inside Electron (persistent local storage) and on the web preview
+ * (storage falls back to memory when the sandbox blocks persistence).
+ */
+(function () {
+  'use strict';
+
+  /* ---------------- Storage (safe in sandboxed iframes too) ---------------- */
+  function storeGet(key) {
+    return window.ToplixStore.get(key);
+  }
+  function storeSet(key, value) {
+    window.ToplixStore.set(key, value);
+  }
+
+  /* ---------------- Providers ---------------- */
+  var PROVIDERS = {
+    openai: {
+      id: 'openai',
+      name: 'OpenAI — ChatGPT & Codex',
+      desc: 'platform.openai.com API key. GPT-6 family & Codex-optimized models.',
+      kind: 'openai-responses',
+      baseUrl: 'https://api.openai.com/v1',
+      keyHint: 'sk-…',
+      models: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-5.6-sol'],
+      defaultModel: 'gpt-6.1-sol'
+    },
+    anthropic: {
+      id: 'anthropic',
+      name: 'Anthropic — Claude',
+      desc: 'console.anthropic.com API key. Opus, Sonnet & Haiku families.',
+      kind: 'anthropic',
+      baseUrl: 'https://api.anthropic.com/v1',
+      keyHint: 'sk-ant-…',
+      models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
+      defaultModel: 'claude-sonnet-5-5'
+    },
+    openrouter: {
+      id: 'openrouter',
+      name: 'OpenRouter',
+      desc: 'One key, hundreds of models from every major lab.',
+      kind: 'openai-chat',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      keyHint: 'sk-or-…',
+      models: ['openai/gpt-6.1-sol', 'anthropic/claude-opus-5-5', 'google/gemini-3-pro', 'meta-llama/llama-4-maverick'],
+      defaultModel: 'anthropic/claude-opus-5-5'
+    },
+    custom: {
+      id: 'custom',
+      name: 'Custom — OpenAI-compatible',
+      desc: 'Any OpenAI-compatible endpoint: Ollama, LM Studio, Groq, Together…',
+      kind: 'openai-chat',
+      baseUrl: 'http://localhost:11434/v1',
+      keyHint: 'optional',
+      models: ['llama3.3', 'qwen2.5-coder', 'mistral-large'],
+      defaultModel: 'llama3.3'
+    }
+  };
+
+  var DEFAULT_SETTINGS = {
+    activeProvider: 'openai',
+    systemPrompt: 'You are Toplix Pro, a senior software engineer. Be concise, correct and practical. Always use markdown code fences with a language tag.',
+    temperature: 0.7,
+    sendOnEnter: true,
+    stream: true,
+    providers: {
+      openai: { apiKey: '', model: 'gpt-6.1-sol', baseUrl: 'https://api.openai.com/v1' },
+      anthropic: { apiKey: '', model: 'claude-sonnet-5-5', baseUrl: 'https://api.anthropic.com/v1' },
+      openrouter: { apiKey: '', model: 'anthropic/claude-opus-5-5', baseUrl: 'https://openrouter.ai/api/v1' },
+      custom: { apiKey: '', model: 'llama3.3', baseUrl: 'http://localhost:11434/v1' }
+    }
+  };
+
+  /* ---------------- State ---------------- */
+  var state = {
+    settings: loadSettings(),
+    chats: loadChats(),
+    activeChatId: null,
+    generating: false,
+    abort: null
+  };
+
+  function loadSettings() {
+    var raw = storeGet('toplex.settings');
+    if (!raw) return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    try {
+      var s = JSON.parse(raw);
+      // merge with defaults so upgrades don't break
+      var merged = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+      Object.keys(s || {}).forEach(function (k) { merged[k] = s[k]; });
+      Object.keys(DEFAULT_SETTINGS.providers).forEach(function (p) {
+        merged.providers[p] = Object.assign({}, DEFAULT_SETTINGS.providers[p], (s.providers || {})[p] || {});
+      });
+      return merged;
+    } catch (e) { return JSON.parse(JSON.stringify(DEFAULT_SETTINGS)); }
+  }
+
+  function loadChats() {
+    var raw = storeGet('toplex.chats');
+    if (!raw) return [];
+    try { return JSON.parse(raw) || []; } catch (e) { return []; }
+  }
+
+  function persist() {
+    storeSet('toplex.settings', JSON.stringify(state.settings));
+    storeSet('toplex.chats', JSON.stringify(state.chats.slice(0, 200)));
+  }
+
+  function activeChat() {
+    return state.chats.find(function (c) { return c.id === state.activeChatId; }) || null;
+  }
+
+  function activeProvider() {
+    var p = state.settings.activeProvider;
+    if (!PROVIDERS[p]) p = 'openai';
+    return PROVIDERS[p];
+  }
+
+  function providerConfig() {
+    return state.settings.providers[activeProvider().id] || state.settings.providers.openai;
+  }
+
+  function isProviderConnected(pid) {
+    var cfg = state.settings.providers[pid];
+    // custom endpoints (Ollama etc.) don't need a key
+    if (pid === 'custom') return !!cfg.baseUrl;
+    return !!(cfg && cfg.apiKey);
+  }
+
+  /* ---------------- DOM helpers ---------------- */
+  function $(sel) { return document.querySelector(sel); }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+  /* ---------------- Toasts ---------------- */
+  function toast(message, isError) {
+    var t = el('div', 'toast' + (isError ? ' error' : ''), message);
+    $('#toast-stack').appendChild(t);
+    setTimeout(function () { t.remove(); }, 3200);
+  }
+
+  /* ---------------- Theme ---------------- */
+  (function initTheme() {
+    var stored = null;
+    stored = window.ToplixStore.get('toplex.theme');
+    // Toplix Pro is dark-first; stored preference wins
+    var theme = stored || 'dark';
+    document.documentElement.setAttribute('data-theme', theme);
+    updateThemeLabel();
+    updateThemeIcon();
+  })();
+
+  function currentTheme() { return document.documentElement.getAttribute('data-theme') || 'dark'; }
+
+  function updateThemeLabel() {
+    var label = $('#theme-label');
+    if (label) label.textContent = currentTheme() === 'dark' ? 'Light mode' : 'Dark mode';
+  }
+
+  function updateThemeIcon() {
+    var btn = $('#theme-toggle');
+    if (!btn) return;
+    btn.innerHTML = currentTheme() === 'dark'
+      ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg><span id="theme-label">Light mode</span>'
+      : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg><span id="theme-label">Dark mode</span>';
+  }
+
+  function toggleTheme() {
+    var next = currentTheme() === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    window.ToplixStore.set('toplex.theme', next);
+    updateThemeLabel();
+    updateThemeIcon();
+  }
+
+  /* ---------------- Sidebar / chat list ---------------- */
+  function renderChatList() {
+    var list = $('#chat-list');
+    list.innerHTML = '';
+    if (!state.chats.length) {
+      var empty = el('p', 'chat-list-empty', 'No chats yet');
+      empty.style.cssText = 'padding:12px;color:var(--color-text-faint);font-size:var(--text-sm);text-align:center;';
+      list.appendChild(empty);
+      return;
+    }
+    state.chats.forEach(function (chat) {
+      var item = el('button', 'chat-item' + (chat.id === state.activeChatId ? ' active' : ''));
+      item.dataset.testid = 'item-chat-' + chat.id;
+      item.setAttribute('aria-label', 'Open chat: ' + chat.title);
+
+      var icon = el('span', '', '');
+      icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+      var title = el('span', 'chat-item-title', chat.title);
+      var del = el('span', 'chat-delete', '');
+      del.setAttribute('role', 'button');
+      del.setAttribute('aria-label', 'Delete chat');
+      del.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>';
+      del.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        deleteChat(chat.id);
+      });
+      item.appendChild(icon);
+      item.appendChild(title);
+      item.appendChild(del);
+      item.addEventListener('click', function () { openChat(chat.id); });
+      list.appendChild(item);
+    });
+  }
+
+  function newChat() {
+    var chat = { id: uid(), title: 'New chat', createdAt: Date.now(), messages: [] };
+    state.chats.unshift(chat);
+    state.activeChatId = chat.id;
+    persist();
+    renderChatList();
+    renderMessages();
+    $('#composer-input').focus();
+  }
+
+  function openChat(id) {
+    if (state.generating) { toast('Wait for the current response to finish', true); return; }
+    state.activeChatId = id;
+    renderChatList();
+    renderMessages();
+  }
+
+  function deleteChat(id) {
+    state.chats = state.chats.filter(function (c) { return c.id !== id; });
+    if (state.activeChatId === id) {
+      state.activeChatId = state.chats.length ? state.chats[0].id : null;
+    }
+    persist();
+    renderChatList();
+    renderMessages();
+  }
+
+  /* ---------------- Messages ---------------- */
+  function renderMessages() {
+    var container = $('#messages');
+    container.innerHTML = '';
+    var chat = activeChat();
+
+    var inner = el('div', 'messages-inner');
+    container.appendChild(inner);
+
+    if (!chat || !chat.messages.length) {
+      inner.appendChild(buildEmptyState());
+      $('#chat-title').textContent = 'New chat';
+      updateModelUI();
+      return;
+    }
+
+    $('#chat-title').textContent = chat.title;
+    chat.messages.forEach(function (msg, idx) {
+      inner.appendChild(buildMessageEl(msg, idx, chat));
+    });
+    updateModelUI();
+    scrollMessages();
+  }
+
+  function buildEmptyState() {
+    var tpl = document.getElementById('empty-state-tpl');
+    var node = tpl.content.firstElementChild.cloneNode(true);
+    node.querySelectorAll('.suggestion-chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        $('#composer-input').value = chip.dataset.prompt;
+        sendMessage();
+      });
+    });
+    return node;
+  }
+
+  function buildMessageEl(msg, idx, chat) {
+    var wrap = el('div', 'msg ' + msg.role);
+
+    if (msg.role === 'user') {
+      var role = el('div', 'msg-role');
+      role.appendChild(el('span', 'role-avatar', 'You'));
+      wrap.appendChild(role);
+      var bubble = el('div', 'msg-user-bubble');
+      bubble.textContent = msg.content;
+      wrap.appendChild(bubble);
+    } else {
+      var roleA = el('div', 'msg-role');
+      roleA.appendChild(el('span', 'role-avatar', 'T'));
+      roleA.appendChild(el('span', '', msg.modelLabel || 'Assistant'));
+      wrap.appendChild(roleA);
+
+      if (msg.error) {
+        wrap.appendChild(el('div', 'msg-error', msg.content));
+      } else {
+        var body = el('div', 'msg-body');
+        body.innerHTML = window.ToplixMarkdown.render(msg.content);
+        wireCopyButtons(body);
+        wrap.appendChild(body);
+
+        var actions = el('div', 'msg-actions');
+        var copyBtn = el('button', 'msg-action', 'Copy');
+        copyBtn.dataset.testid = 'button-copy-msg-' + idx;
+        copyBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy';
+        copyBtn.addEventListener('click', function () {
+          copyText(msg.content);
+          copyBtn.textContent = 'Copied';
+          setTimeout(function () { copyBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy'; }, 1600);
+        });
+        actions.appendChild(copyBtn);
+
+        var regen = el('button', 'msg-action', 'Regenerate');
+        regen.dataset.testid = 'button-regen-' + idx;
+        regen.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg> Regenerate';
+        regen.addEventListener('click', function () { regenerate(chat); });
+        actions.appendChild(regen);
+
+        wrap.appendChild(actions);
+      }
+    }
+    return wrap;
+  }
+
+  function wireCopyButtons(scope) {
+    (scope || document).querySelectorAll('.copy-code').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var pre = btn.closest('.code-block').querySelector('code');
+        copyText(pre.textContent);
+        var old = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(function () { btn.textContent = old; }, 1500);
+      });
+    });
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(function () { fallbackCopy(text); });
+    } else fallbackCopy(text);
+  }
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    ta.remove();
+  }
+
+  function scrollMessages() {
+    var container = $('#messages');
+    requestAnimationFrame(function () { container.scrollTop = container.scrollHeight; });
+  }
+
+  /* ---------------- Model picker ---------------- */
+  function renderModelMenu() {
+    var menu = $('#model-menu');
+    menu.innerHTML = '';
+    Object.keys(PROVIDERS).forEach(function (pid) {
+      var p = PROVIDERS[pid];
+      var cfg = state.settings.providers[pid];
+      var group = el('div', 'model-menu-group', p.name);
+      menu.appendChild(group);
+      p.models.forEach(function (model) {
+        var selected = pid === state.settings.activeProvider && model === cfg.model;
+        var item = el('button', 'model-menu-item' + (selected ? ' selected' : ''));
+        item.setAttribute('role', 'option');
+        item.setAttribute('aria-selected', selected ? 'true' : 'false');
+        item.dataset.testid = 'item-model-' + model.replace(/\//g, '-');
+        var name = el('span', 'model-name', model);
+        item.appendChild(name);
+        if (selected) {
+          var check = el('span', 'model-check');
+          check.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+          item.appendChild(check);
+        }
+        item.addEventListener('click', function () {
+          state.settings.activeProvider = pid;
+          state.settings.providers[pid].model = model;
+          persist();
+          renderModelMenu();
+          updateModelUI();
+          $('#model-menu').classList.remove('open');
+        });
+        menu.appendChild(item);
+      });
+    });
+  }
+
+  function updateModelUI() {
+    var p = activeProvider();
+    var cfg = providerConfig();
+    $('#model-picker-label').textContent = cfg.model || p.defaultModel;
+    $('#model-dot').classList.toggle('connected', isProviderConnected(p.id));
+    $('#demo-banner').hidden = isProviderConnected(p.id);
+    $('#demo-provider-name').textContent = p.name.split('—')[0].trim();
+  }
+
+  /* ---------------- Send / generate ---------------- */
+  function setGenerating(on) {
+    state.generating = on;
+    $('#stop-btn').hidden = !on;
+    $('#send-btn').disabled = on ? true : !$('#composer-input').value.trim();
+    $('#composer-input').disabled = false;
+  }
+
+  function sendMessage() {
+    var input = $('#composer-input');
+    var text = input.value.trim();
+    if (!text || state.generating) return;
+
+    if (!state.activeChatId || !activeChat()) newChat();
+    var chat = activeChat();
+
+    chat.messages.push({ role: 'user', content: text, ts: Date.now() });
+    if (chat.title === 'New chat') {
+      chat.title = text.slice(0, 46) + (text.length > 46 ? '…' : '');
+    }
+    input.value = '';
+    autoGrow(input);
+    persist();
+    renderChatList();
+    renderMessages();
+    generate(chat);
+  }
+
+  function regenerate(chat) {
+    if (state.generating) return;
+    // remove trailing assistant messages, keep history up to last user message
+    while (chat.messages.length && chat.messages[chat.messages.length - 1].role === 'assistant') {
+      chat.messages.pop();
+    }
+    if (!chat.messages.length) return;
+    persist();
+    renderMessages();
+    generate(chat);
+  }
+
+  function generate(chat) {
+    var p = activeProvider();
+    var cfg = providerConfig();
+    var connected = isProviderConnected(p.id);
+
+    // placeholder assistant message
+    var msg = {
+      role: 'assistant',
+      content: '',
+      modelLabel: cfg.model,
+      demo: !connected,
+      ts: Date.now()
+    };
+    chat.messages.push(msg);
+    persist();
+    renderMessages();
+
+    var bodyEl = $('#messages .messages-inner').lastElementChild.querySelector('.msg-body');
+    if (!bodyEl) { renderMessages(); bodyEl = $('#messages .messages-inner').lastElementChild.querySelector('.msg-body'); }
+    bodyEl.classList.add('stream-cursor');
+    setGenerating(true);
+    state.abort = new AbortController();
+
+    if (!connected) {
+      demoGenerate(msg, bodyEl, chat);
+      return;
+    }
+
+    var history = chat.messages
+      .filter(function (m) { return !m.error; })
+      .map(function (m) { return { role: m.role, content: m.content }; });
+    // drop the empty placeholder we just added
+    history = history.slice(0, -1);
+
+    var promise;
+    if (p.kind === 'openai-responses') promise = streamOpenAIResponses(p, cfg, history, msg, bodyEl);
+    else if (p.kind === 'anthropic') promise = streamAnthropic(p, cfg, history, msg, bodyEl);
+    else promise = streamOpenAIChat(p, cfg, history, msg, bodyEl);
+
+    promise.then(function () {
+      finishGenerate(chat, msg, bodyEl, null);
+    }).catch(function (err) {
+      if (err && err.name === 'AbortError') {
+        msg.content += '\n\n*(stopped)*';
+        finishGenerate(chat, msg, bodyEl, null);
+      } else {
+        finishGenerate(chat, msg, bodyEl, err);
+      }
+    });
+  }
+
+  function finishGenerate(chat, msg, bodyEl, error) {
+    bodyEl.classList.remove('stream-cursor');
+    setGenerating(false);
+    state.abort = null;
+    if (error) {
+      msg.error = true;
+      msg.content = 'Request failed: ' + (error.message || error) +
+        '. Check your API key, model name and connection in Settings.';
+    }
+    if (!msg.content) msg.content = '*(empty response)*';
+    persist();
+    renderMessages();
+  }
+
+  /* ---------------- Demo mode (no API key) ---------------- */
+  var DEMO_RESPONSES = [
+    'Sure — here is a clean approach.\n\n```python\nimport time\nfrom pathlib import Path\n\ndef watch_folder(folder: str):\n    """Watch a folder and greet every new file."""\n    seen = set()\n    while True:\n        current = {p.name for p in Path(folder).glob("*")}\n        for name in current - seen:\n            print("new file:", name)\n        seen = current\n        time.sleep(1)\n```\n\n**How it works:** the loop polls the folder once a second and diffs the file list. In production you would swap the poll for `watchdog` events, but this version has zero dependencies.\n\nWant me to add CSV → Parquet conversion to it?',
+    'Here is the idea, then the code.\n\n1. Identify what re-renders unnecessarily\n2. Wrap expensive subtrees in `memo`\n3. Stabilise callbacks with `useCallback`\n\n```tsx\nconst Row = memo(function Row({ item, onPick }) {\n  return <li onClick={() => onPick(item.id)}>{item.name}</li>;\n});\n```\n\nThis is a demo response — add an API key in **Settings → Models & API keys** to get real answers from GPT-6, Claude or any OpenRouter model.',
+    'Short answer: two goroutines race to read-modify-write the same value, and the final state depends on who wins.\n\n```go\nvar counter int64\n\nfunc safeInc() {\n    atomic.AddInt64(&counter, 1) // correct\n}\n```\n\nUse `sync.Mutex` or `atomic` operations. The buggy version (`counter++` from many goroutines) loses updates because the read and the write are not one step.\n\n*(Demo mode — connect a provider in Settings for real answers.)*'
+  ];
+  var demoIdx = 0;
+
+  function demoGenerate(msg, bodyEl, chat) {
+    var text = DEMO_RESPONSES[(demoIdx++) % DEMO_RESPONSES.length];
+    var i = 0;
+    var step = Math.max(2, Math.round(text.length / 160));
+    var timer = setInterval(function () {
+      i += step;
+      msg.content = text.slice(0, i);
+      bodyEl.innerHTML = window.ToplixMarkdown.render(msg.content);
+      wireCopyButtons(bodyEl);
+      scrollMessages();
+      if (i >= text.length) {
+        clearInterval(timer);
+        finishGenerate(chat, msg, bodyEl, null);
+      }
+    }, 16);
+    state.abort.signal.addEventListener('abort', function () {
+      clearInterval(timer);
+      finishGenerate(chat, msg, bodyEl, null);
+    });
+  }
+
+  /* ---------------- SSE helper ---------------- */
+  function readSSE(response, onEvent) {
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+    function pump() {
+      return reader.read().then(function (result) {
+        if (result.done) return;
+        buffer += decoder.decode(result.value, { stream: true });
+        var parts = buffer.split('\n');
+        buffer = parts.pop();
+        for (var i = 0; i < parts.length; i++) {
+          var line = parts[i].trim();
+          if (!line.startsWith('data:')) continue;
+          var data = line.slice(5).trim();
+          if (data === '[DONE]') return;
+          try { onEvent(JSON.parse(data)); } catch (e) { /* partial chunk */ }
+        }
+        return pump();
+      });
+    }
+    return pump();
+  }
+
+  function assertOk(response) {
+    if (response.ok) return Promise.resolve();
+    return response.text().then(function (body) {
+      var detail = body;
+      try { detail = JSON.parse(body).error?.message || body; } catch (e) {}
+      throw new Error('HTTP ' + response.status + (detail ? ' — ' + detail : ''));
+    });
+  }
+
+  /* ---------------- OpenAI Responses API ---------------- */
+  function streamOpenAIResponses(p, cfg, history, msg, bodyEl) {
+    var input = history.map(function (m) {
+      return { role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content };
+    });
+    if (state.settings.systemPrompt) input.unshift({ role: 'system', content: state.settings.systemPrompt });
+
+    return fetch(cfg.baseUrl + '/responses', {
+      method: 'POST',
+      signal: state.abort.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + cfg.apiKey
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        input: input,
+        stream: !!state.settings.stream
+      })
+    }).then(function (res) {
+      return assertOk(res).then(function () {
+        if (!state.settings.stream) {
+          return res.json().then(function (data) {
+            var out = (data.output || []).map(function (o) {
+              return (o.content || []).map(function (c) { return c.text || ''; }).join('');
+            }).join('');
+            msg.content = out;
+            bodyEl.innerHTML = window.ToplixMarkdown.render(out);
+          });
+        }
+        return readSSE(res, function (event) {
+          if (event.type === 'response.output_text.delta' && event.delta) {
+            msg.content += event.delta;
+            bodyEl.innerHTML = window.ToplixMarkdown.render(msg.content);
+            wireCopyButtons(bodyEl);
+            scrollMessages();
+          }
+          if (event.type === 'error' || (event.response && event.response.error)) {
+            throw new Error(event.error?.message || event.response?.error?.message || 'stream error');
+          }
+        });
+      });
+    });
+  }
+
+  /* ---------------- OpenAI Chat Completions (OpenRouter / custom) ---------------- */
+  function streamOpenAIChat(p, cfg, history, msg, bodyEl) {
+    var messages = history.map(function (m) { return { role: m.role, content: m.content }; });
+    if (state.settings.systemPrompt) messages.unshift({ role: 'system', content: state.settings.systemPrompt });
+
+    return fetch(cfg.baseUrl + '/chat/completions', {
+      method: 'POST',
+      signal: state.abort.signal,
+      headers: Object.assign(
+        { 'Content-Type': 'application/json' },
+        cfg.apiKey ? { 'Authorization': 'Bearer ' + cfg.apiKey } : {},
+        p.id === 'openrouter' ? { 'HTTP-Referer': 'https://toplex.pro', 'X-Title': 'Toplix Pro' } : {}
+      ),
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: messages,
+        stream: !!state.settings.stream,
+        temperature: state.settings.temperature
+      })
+    }).then(function (res) {
+      return assertOk(res).then(function () {
+        if (!state.settings.stream) {
+          return res.json().then(function (data) {
+            var out = (data.choices && data.choices[0] && data.choices[0].message.content) || '';
+            msg.content = out;
+            bodyEl.innerHTML = window.ToplixMarkdown.render(out);
+          });
+        }
+        return readSSE(res, function (event) {
+          var delta = event.choices && event.choices[0] && event.choices[0].delta;
+          if (delta && delta.content) {
+            msg.content += delta.content;
+            bodyEl.innerHTML = window.ToplixMarkdown.render(msg.content);
+            wireCopyButtons(bodyEl);
+            scrollMessages();
+          }
+        });
+      });
+    });
+  }
+
+  /* ---------------- Anthropic Messages API ---------------- */
+  function streamAnthropic(p, cfg, history, msg, bodyEl) {
+    var messages = history.filter(function (m) { return m.role !== 'system'; });
+    return fetch(cfg.baseUrl + '/messages', {
+      method: 'POST',
+      signal: state.abort.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': cfg.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        system: state.settings.systemPrompt || undefined,
+        messages: messages,
+        max_tokens: 8192,
+        temperature: Math.min(1, state.settings.temperature),
+        stream: !!state.settings.stream
+      })
+    }).then(function (res) {
+      return assertOk(res).then(function () {
+        if (!state.settings.stream) {
+          return res.json().then(function (data) {
+            var out = (data.content || []).map(function (c) { return c.text || ''; }).join('');
+            msg.content = out;
+            bodyEl.innerHTML = window.ToplixMarkdown.render(out);
+          });
+        }
+        return readSSE(res, function (event) {
+          if (event.type === 'content_block_delta' && event.delta && event.delta.text) {
+            msg.content += event.delta.text;
+            bodyEl.innerHTML = window.ToplixMarkdown.render(msg.content);
+            wireCopyButtons(bodyEl);
+            scrollMessages();
+          }
+          if (event.type === 'error') {
+            throw new Error((event.error && event.error.message) || 'stream error');
+          }
+        });
+      });
+    });
+  }
+
+  /* ---------------- Settings modal ---------------- */
+  function openSettings() {
+    // build provider cards
+    var cards = $('#provider-cards');
+    cards.innerHTML = '';
+    Object.keys(PROVIDERS).forEach(function (pid) {
+      var p = PROVIDERS[pid];
+      var cfg = state.settings.providers[pid];
+
+      var card = el('div', 'provider-card' + (pid === state.settings.activeProvider ? ' active' : ''));
+      card.dataset.provider = pid;
+
+      var top = el('div', 'provider-card-top');
+      var logo = el('div', 'provider-logo', p.name.split(' ')[0].slice(0, 2).toUpperCase());
+      var meta = el('div', 'provider-meta');
+      meta.appendChild(el('div', 'provider-name', p.name));
+      meta.appendChild(el('div', 'provider-desc', p.desc));
+      var status = el('div', 'provider-status' + (isProviderConnected(pid) ? ' on' : ''), '');
+      status.appendChild(el('span', 'status-dot'));
+      status.appendChild(document.createTextNode(isProviderConnected(pid) ? 'Connected' : 'Not set'));
+      top.appendChild(logo); top.appendChild(meta); top.appendChild(status);
+      card.appendChild(top);
+
+      var fields = el('div', 'provider-fields');
+      var keyWrap = el('div', 'field-row span-2 key-wrap');
+      var keyLabel = el('label', '', 'API key');
+      keyLabel.setAttribute('for', 'key-' + pid);
+      var keyInput = el('input');
+      keyInput.type = 'password'; keyInput.id = 'key-' + pid;
+      keyInput.placeholder = p.keyHint; keyInput.value = cfg.apiKey || '';
+      keyInput.dataset.testid = 'input-key-' + pid;
+      keyInput.autocomplete = 'off';
+      var reveal = el('button', 'key-reveal', 'Show');
+      reveal.type = 'button';
+      reveal.addEventListener('click', function () {
+        var hidden = keyInput.type === 'password';
+        keyInput.type = hidden ? 'text' : 'password';
+        reveal.textContent = hidden ? 'Hide' : 'Show';
+      });
+      keyWrap.appendChild(keyLabel); keyWrap.appendChild(keyInput); keyWrap.appendChild(reveal);
+
+      var modelField = el('div', 'field-row');
+      var modelLabel = el('label', '', 'Model');
+      modelLabel.setAttribute('for', 'model-' + pid);
+      var modelInput = el('input');
+      modelInput.type = 'text'; modelInput.id = 'model-' + pid; modelInput.value = cfg.model;
+      modelInput.placeholder = p.defaultModel;
+      modelInput.setAttribute('list', 'models-' + pid);
+      var datalist = el('datalist'); datalist.id = 'models-' + pid;
+      p.models.forEach(function (m) { datalist.appendChild(el('option', '', m)); });
+      modelField.appendChild(modelLabel); modelField.appendChild(modelInput); modelField.appendChild(datalist);
+
+      var urlField = el('div', 'field-row');
+      var urlLabel = el('label', '', 'Base URL');
+      urlLabel.setAttribute('for', 'url-' + pid);
+      var urlInput = el('input');
+      urlInput.type = 'text'; urlInput.id = 'url-' + pid; urlInput.value = cfg.baseUrl;
+      urlInput.placeholder = p.baseUrl;
+      urlField.appendChild(urlLabel); urlField.appendChild(urlInput);
+
+      fields.appendChild(keyWrap); fields.appendChild(modelField); fields.appendChild(urlField);
+      card.appendChild(fields);
+
+      var activate = el('button', 'btn ghost');
+      activate.textContent = pid === state.settings.activeProvider ? '✓ Active provider' : 'Use this provider';
+      activate.style.marginTop = 'var(--space-3)';
+      activate.dataset.testid = 'button-activate-' + pid;
+      activate.addEventListener('click', function () {
+        state.settings.activeProvider = pid;
+        openSettings();
+        persist();
+        updateModelUI();
+      });
+      card.appendChild(activate);
+
+      cards.appendChild(card);
+    });
+
+    $('#setting-system').value = state.settings.systemPrompt;
+    $('#setting-temp').value = state.settings.temperature;
+    $('#temp-value').textContent = state.settings.temperature;
+    $('#setting-enter').checked = state.settings.sendOnEnter;
+    $('#setting-stream').checked = state.settings.stream;
+
+    $('#settings-overlay').hidden = false;
+  }
+
+  function closeSettings() { $('#settings-overlay').hidden = true; }
+
+  function saveSettings() {
+    Object.keys(PROVIDERS).forEach(function (pid) {
+      var cfg = state.settings.providers[pid];
+      var keyEl = $('#key-' + pid);
+      var modelEl = $('#model-' + pid);
+      var urlEl = $('#url-' + pid);
+      if (keyEl) cfg.apiKey = keyEl.value.trim();
+      if (modelEl) cfg.model = modelEl.value.trim() || PROVIDERS[pid].defaultModel;
+      if (urlEl) cfg.baseUrl = urlEl.value.trim() || PROVIDERS[pid].baseUrl;
+    });
+    state.settings.systemPrompt = $('#setting-system').value;
+    state.settings.temperature = parseFloat($('#setting-temp').value);
+    state.settings.sendOnEnter = $('#setting-enter').checked;
+    state.settings.stream = $('#setting-stream').checked;
+    persist();
+    closeSettings();
+    updateModelUI();
+    renderModelMenu();
+    toast('Settings saved');
+  }
+
+  function resetAppData() {
+    if (!window.confirm('Delete all chats, API keys and settings? This cannot be undone.')) return;
+    window.ToplixStore.remove('toplex.settings');
+    window.ToplixStore.remove('toplex.chats');
+    window.ToplixStore.remove('toplex.theme');
+    state.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    state.chats = [];
+    state.activeChatId = null;
+    closeSettings();
+    renderChatList();
+    renderMessages();
+    renderModelMenu();
+    updateModelUI();
+    toast('App data reset');
+  }
+
+  /* ---------------- Composer helpers ---------------- */
+  function autoGrow(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, window.innerHeight * 0.4) + 'px';
+  }
+
+  /* ---------------- Wire up ---------------- */
+  document.addEventListener('DOMContentLoaded', function () {
+    renderChatList();
+    renderMessages();
+    renderModelMenu();
+    updateModelUI();
+
+    $('#new-chat-btn').addEventListener('click', newChat);
+    $('#sidebar-collapse').addEventListener('click', function () { $('#app').classList.add('sidebar-hidden'); });
+    $('#sidebar-expand').addEventListener('click', function () { $('#app').classList.remove('sidebar-hidden'); });
+    $('#theme-toggle').addEventListener('click', toggleTheme);
+    $('#open-settings').addEventListener('click', openSettings);
+    $('#open-settings-top').addEventListener('click', openSettings);
+    $('#demo-open-settings').addEventListener('click', openSettings);
+    $('#demo-close').addEventListener('click', function () { $('#demo-banner').hidden = true; });
+
+    $('#model-picker-btn').addEventListener('click', function (e) {
+      e.stopPropagation();
+      var menu = $('#model-menu');
+      var open = menu.classList.toggle('open');
+      $('#model-picker-btn').setAttribute('aria-expanded', open);
+    });
+    document.addEventListener('click', function () { $('#model-menu').classList.remove('open'); });
+
+    $('#send-btn').addEventListener('click', sendMessage);
+    $('#stop-btn').addEventListener('click', function () {
+      if (state.abort) state.abort.abort();
+    });
+
+    var input = $('#composer-input');
+    input.addEventListener('input', function () {
+      autoGrow(input);
+      $('#send-btn').disabled = state.generating || !input.value.trim();
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey && state.settings.sendOnEnter) {
+        e.preventDefault();
+        sendMessage();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault(); newChat();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+        e.preventDefault(); openSettings();
+      }
+      if (e.key === 'Escape') {
+        if (!$('#settings-overlay').hidden) closeSettings();
+        else if (state.generating && state.abort) state.abort.abort();
+      }
+    });
+
+    // Settings modal
+    $('#settings-close').addEventListener('click', closeSettings);
+    $('#settings-cancel').addEventListener('click', closeSettings);
+    $('#settings-save').addEventListener('click', saveSettings);
+    $('#settings-reset').addEventListener('click', resetAppData);
+    $('#settings-overlay').addEventListener('click', function (e) {
+      if (e.target === $('#settings-overlay')) closeSettings();
+    });
+
+    document.querySelectorAll('.settings-tab').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        document.querySelectorAll('.settings-tab').forEach(function (t) {
+          t.classList.toggle('active', t === tab);
+          t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
+        });
+        document.querySelectorAll('.settings-pane').forEach(function (pane) {
+          pane.classList.toggle('active', pane.dataset.pane === tab.dataset.tab);
+        });
+      });
+    });
+
+    $('#setting-temp').addEventListener('input', function (e) {
+      $('#temp-value').textContent = e.target.value;
+    });
+
+    // Shorter composer placeholder on narrow screens
+    if (window.innerWidth < 780) $('#composer-input').placeholder = 'Ask Toplix to code…';
+
+    // Mobile: start with the drawer closed; tapping the main area closes it
+    if (window.innerWidth < 780) $('#app').classList.add('sidebar-hidden');
+    $('.main').addEventListener('click', function () {
+      if (window.innerWidth < 780) $('#app').classList.add('sidebar-hidden');
+    });
+
+    // Start with an empty chat view
+    if (!state.chats.length) {
+      updateModelUI();
+    }
+  });
+})();

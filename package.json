@@ -1,0 +1,51 @@
+{
+  "name": "toplex-pro",
+  "productName": "Toplix Pro",
+  "version": "1.0.0",
+  "description": "Toplix Pro — a fast, focused AI coding assistant for macOS. Connect ChatGPT, Codex, Claude, OpenRouter or any OpenAI-compatible endpoint.",
+  "author": "HomekidChud",
+  "license": "LicenseRef-LICENSE",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac dmg"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.homekidchud.toplexpro",
+    "productName": "Toplix Pro",
+    "copyright": "Copyright © 2026 HomekidChud. All rights reserved.",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "renderer/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64", "x64"]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Toplix-Pro-${version}-${arch}.dmg",
+      "dmg": {
+        "title": "Toplix Pro ${version}",
+        "window": {
+          "width": 540,
+          "height": 380
+        },
+        "contents": [
+          { "x": 140, "y": 190 },
+          { "x": 400, "y": 190, "type": "link", "path": "/Applications" }
+        ]
+      }
+    }
+  }
+}
