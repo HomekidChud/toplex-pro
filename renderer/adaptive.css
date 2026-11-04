@@ -1,0 +1,157 @@
+/* ============================================================
+   Toplix Pro — adaptive layer
+   Fluid sizing, safe areas, touch targets, drawer/bottom-sheet
+   patterns. Driven by <html data-size|data-input|data-compact|
+   data-orientation|data-short> set in adaptive.js.
+   ============================================================ */
+
+:root {
+  --sidebar-w: clamp(15rem, 21vw, 20rem);
+  --content-w: clamp(32rem, 62vw, 52rem);
+  --gutter: clamp(var(--space-4), 3vw, var(--space-8));
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+}
+
+/* ---- Fluid shell (desktop / tablet landscape) ---- */
+.app { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
+.app.sidebar-hidden { grid-template-columns: 0px minmax(0, 1fr); }
+.messages-inner { max-width: var(--content-w); }
+.composer, .composer-disclaimer { max-width: var(--content-w); }
+.topbar, .composer-wrap, .messages {
+  padding-left: calc(var(--gutter) + var(--sal));
+  padding-right: calc(var(--gutter) + var(--sar));
+}
+.topbar { padding-top: calc(var(--space-3) + var(--sat)); }
+.composer-wrap { padding-bottom: calc(var(--space-4) + var(--sab)); }
+.demo-banner { margin-left: calc(var(--gutter) + var(--sal)); margin-right: calc(var(--gutter) + var(--sar)); }
+.suggestions { grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr)); }
+.app.sidebar-hidden .topbar,
+.app.sidebar-hidden .composer-wrap { padding-left: calc(4.5rem + var(--sal)); }
+.sidebar { padding-top: var(--sat); padding-left: var(--sal); }
+.sidebar-float { top: calc(var(--space-3) + var(--sat)); left: calc(var(--space-4) + var(--sal)); }
+
+/* Scale the whole UI up on big monitors */
+@media (min-width: 1600px) { html { font-size: 106.25%; } }
+@media (min-width: 2200px) { html { font-size: 125%; } }
+
+/* Drawer scrim */
+.drawer-scrim {
+  position: fixed; inset: 0; z-index: 55;
+  background: rgba(17, 24, 39, 0.4);
+  opacity: 0; pointer-events: none;
+  transition: opacity 200ms ease;
+}
+.drawer-scrim.show { opacity: 1; pointer-events: auto; }
+
+/* ---- Compact screens: drawer sidebar (phones and small tablets) ---- */
+@media (max-width: 899.98px) {
+  .app, .app.sidebar-hidden { grid-template-columns: minmax(0, 1fr); }
+  .sidebar {
+    position: fixed; inset: 0 auto 0 0; width: min(20rem, 86vw); z-index: 60;
+    box-shadow: var(--shadow-lg);
+  }
+  .app.sidebar-hidden .sidebar { transform: translateX(-100%); box-shadow: none; visibility: hidden; transition: transform 240ms cubic-bezier(0.16,1,0.3,1), visibility 0s linear 240ms; }
+  .app:not(.sidebar-hidden) .sidebar { transform: none; visibility: visible; }
+  .app.sidebar-hidden .sidebar-float { display: grid; }
+  .app:not(.sidebar-hidden) .sidebar-float { display: none; }
+  .app.sidebar-hidden .topbar, .app.sidebar-hidden .composer-wrap { padding-left: calc(var(--gutter) + var(--sal)); }
+  .app.sidebar-hidden .topbar { padding-left: calc(4rem + var(--sal)); }
+  :root { --content-w: 100%; --gutter: var(--space-4); }
+}
+
+/* ---- Phones ---- */
+@media (max-width: 599.98px) {
+  html { --gutter: var(--space-3); }
+  .messages { padding-top: var(--space-5); }
+  .msg { margin-bottom: var(--space-6); }
+  .msg-user-bubble { max-width: 92%; }
+  .composer { border-radius: var(--radius-lg); padding: var(--space-2) var(--space-3); }
+  .composer-hint, .composer-disclaimer { display: none; }
+  .model-pill { max-width: 58vw; }
+  .model-pill #model-picker-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .code-block pre { font-size: 0.76rem; padding: var(--space-3); }
+  .demo-banner { flex-wrap: wrap; }
+
+  /* Model menu becomes a bottom sheet */
+  .model-menu {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; min-width: 0;
+    max-height: 65dvh; border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    padding-bottom: calc(var(--space-3) + var(--sab));
+    box-shadow: 0 -12px 40px rgba(17, 24, 39, 0.25);
+  }
+
+  /* Settings becomes a full-screen sheet */
+  .modal-overlay { padding: 0; place-items: stretch; }
+  .modal {
+    width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; border: none;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+  .modal-head { padding-top: calc(var(--space-3) + var(--sat)); }
+  .modal-foot { padding-bottom: calc(var(--space-3) + var(--sab)); flex-wrap: wrap; }
+  .modal-head .crumb { display: none; }
+  .mcp-add-row { grid-template-columns: 1fr; }
+  .mcp-add-row #mcp-add-btn { grid-column: 1; justify-self: stretch; }
+}
+
+/* ---- Tablets: keep a roomier modal and two-column suggestions ---- */
+@media (min-width: 600px) and (max-width: 899.98px) {
+  .modal { width: min(44rem, 100%); }
+  .model-menu { min-width: 20rem; }
+}
+
+/* ---- Landscape phones / very short windows ---- */
+html[data-short='true'] .composer-disclaimer,
+html[data-short='true'] .composer-hint,
+html[data-short='true'] .demo-banner,
+html[data-short='true'] .empty-mark,
+html[data-short='true'] .suggestions,
+html[data-short='true'] .empty-state > p { display: none; }
+html[data-short='true'] .messages { padding-top: var(--space-3); }
+html[data-short='true'] .topbar { padding-top: calc(var(--space-2) + var(--sat)); padding-bottom: var(--space-2); }
+html[data-short='true'] .composer-wrap { padding-top: var(--space-2); padding-bottom: calc(var(--space-2) + var(--sab)); }
+html[data-short='true'] .composer textarea { max-height: 28vh; }
+html[data-short='true'] .modal { max-height: 100dvh; }
+
+/* ---- Touch input: bigger targets, no hover-only controls ---- */
+html[data-input='touch'] .icon-btn { width: 44px; height: 44px; }
+html[data-input='touch'] .demo-close { width: 36px; height: 36px; }
+html[data-input='touch'] .send-btn { width: 44px; height: 44px; }
+html[data-input='touch'] .stop-btn { width: 40px; height: 40px; }
+html[data-input='touch'] .chat-item,
+html[data-input='touch'] .sidebar-foot-btn,
+html[data-input='touch'] .settings-tab,
+html[data-input='touch'] .model-menu-item,
+html[data-input='touch'] .new-chat-btn { min-height: 44px; }
+html[data-input='touch'] .model-pill { min-height: 40px; }
+html[data-input='touch'] .msg-action { min-width: 40px; min-height: 40px; }
+html[data-input='touch'] .chat-item .chat-delete,
+html[data-input='touch'] .msg .msg-actions { opacity: 1; }
+html[data-input='touch'] .copy-code { min-height: 32px; padding: 0 var(--space-2); }
+html[data-input='touch'] .new-chat-btn kbd,
+html[data-input='touch'] .composer-hint { display: none; }
+/* 16px+ inputs stop iOS/Android zooming the page on focus */
+html[data-input='touch'] input,
+html[data-input='touch'] textarea,
+html[data-input='touch'] select { font-size: max(1rem, 16px); }
+html[data-input='touch'] .messages { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+html[data-input='touch'] body { -webkit-tap-highlight-color: transparent; }
+
+/* ---- Mouse input: keep hover affordances tidy ---- */
+html[data-input='mouse'] .drawer-scrim { display: none; }
+
+/* ---- Foldable / dual-screen hint ---- */
+@media (horizontal-viewport-segments: 2) {
+  .app { grid-template-columns: env(viewport-segment-width 0 0, var(--sidebar-w)) minmax(0, 1fr); }
+}
+
+/* ---- Print ---- */
+@media print {
+  .sidebar, .sidebar-float, .topbar, .composer-wrap, .drawer-scrim { display: none !important; }
+  .app { display: block; height: auto; }
+  .messages { overflow: visible; }
+  body { overflow: visible; }
+}

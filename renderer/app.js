@@ -167,7 +167,17 @@
     var stored = null;
     stored = window.ToplixStore.get('toplex.theme');
     // Toplix Pro is light-first (T3 Code style); stored preference wins
-    var theme = stored || 'light';
+    var sysDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+    var theme = stored || (sysDark && sysDark.matches ? 'dark' : 'light');
+    // Follow the system until the user picks a theme themselves
+    if (!stored && sysDark && sysDark.addEventListener) {
+      sysDark.addEventListener('change', function (ev) {
+        if (window.ToplixStore.get('toplex.theme')) return;
+        document.documentElement.setAttribute('data-theme', ev.matches ? 'dark' : 'light');
+        updateThemeLabel();
+        updateThemeIcon();
+      });
+    }
     document.documentElement.setAttribute('data-theme', theme);
     updateThemeLabel();
     updateThemeIcon();
@@ -1303,14 +1313,7 @@
     // Connect MCP servers on launch
     refreshMcpTools();
 
-    // Shorter composer placeholder on narrow screens
-    if (window.innerWidth < 780) $('#composer-input').placeholder = 'Ask Toplix to code…';
-
-    // Mobile: start with the drawer closed; tapping the main area closes it
-    if (window.innerWidth < 780) $('#app').classList.add('sidebar-hidden');
-    $('.main').addEventListener('click', function () {
-      if (window.innerWidth < 780) $('#app').classList.add('sidebar-hidden');
-    });
+    // Drawer / placeholder / layout adaptation lives in adaptive.js
 
     // Start with an empty chat view
     if (!state.chats.length) {

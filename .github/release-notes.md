@@ -1,9 +1,11 @@
 Toplix Pro __VERSION__ is now available on macOS, Windows, Linux and Android.
 
 ## What's new
-- New platforms: Windows installer, Linux AppImage and .deb, and an Android APK.
-- Android: full chat, models, MCP tool servers and the toplex:// magic-link sign-in, in a mobile layout.
-- Desktop window chrome now adapts per platform (macOS keeps the inset title bar).
+- Adaptive UI: the layout now adapts automatically to phones, tablets, laptops and large monitors, in portrait or landscape.
+- Phones and small tablets: slide-out sidebar (swipe from the left edge, tap outside to close, auto-closes after you pick a chat), full-screen settings, bottom-sheet model picker, Android back button support.
+- Touch screens get 44px tap targets and always-visible message actions; keyboard hints are hidden.
+- Large screens get a wider sidebar, wider reading column and scaled-up text.
+- Respects notches and system bars, short landscape windows, and the system light/dark setting until you pick a theme.
 
 ## Downloads
 | Device | File |
