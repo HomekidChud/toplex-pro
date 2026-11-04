@@ -121,12 +121,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: android, path: out/*.apk, if-no-files-found: error }
 
-  ios:
-    uses: ./.github/workflows/ios.yml
-
+  # iOS is NOT built from tags — run the "iOS build" workflow manually from the
+  # Actions tab when you want a sideloadable .ipa.
   release:
-    # The iOS build is allowed to fail without blocking the other downloads.
-    needs: [macos, windows, linux, android, ios]
+    needs: [macos, windows, linux, android]
     if: ${{ !cancelled() && needs.macos.result == 'success' && needs.windows.result == 'success' && needs.linux.result == 'success' && needs.android.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
