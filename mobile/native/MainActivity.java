@@ -7,6 +7,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(ToplixNativePlugin.class);
+        registerPlugin(ToplixLocalLLMPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

@@ -1,7 +1,7 @@
 {
   "name": "toplix-pro-mobile",
   "private": true,
-  "version": "1.4.2",
+  "version": "1.5.0",
   "description": "Capacitor Android shell for Toplix Pro (built in CI, see .github/workflows/release.yml)",
   "dependencies": {
     "@capacitor/android": "^7.4.0",

@@ -56,10 +56,20 @@
       models: ['glm-4.6', 'glm-4.5', 'glm-4-flash', 'glm-4-plus'],
       defaultModel: 'glm-4.6'
     },
+    device: {
+      id: 'device',
+      name: 'On this phone — local models',
+      desc: 'Runs fully on this phone, on its GPU if you allow it. No account or key, works offline after a download.',
+      kind: 'on-device',
+      baseUrl: '',
+      keyHint: '',
+      models: [],
+      defaultModel: ''
+    },
     custom: {
       id: 'custom',
       name: 'Custom — OpenAI-compatible',
-      desc: 'Any OpenAI-compatible endpoint: Ollama, LM Studio, Groq, Together…',
+      desc: 'Any OpenAI-compatible endpoint: Ollama or LM Studio on your computer (on a phone use its Wi-Fi address, like http://192.168.1.20:11434/v1), Groq, Together…',
       kind: 'openai-chat',
       baseUrl: 'http://localhost:11434/v1',
       keyHint: 'optional',
@@ -81,6 +91,7 @@
       anthropic: { apiKey: '', model: 'claude-sonnet-5-5', baseUrl: 'https://api.anthropic.com/v1' },
       openrouter: { apiKey: '', model: 'anthropic/claude-opus-5-5', baseUrl: 'https://openrouter.ai/api/v1' },
       glm: { apiKey: '', model: 'glm-4.6', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
+      device: { apiKey: '', model: '', baseUrl: '' },
       custom: { apiKey: '', model: 'llama3.3', baseUrl: 'http://localhost:11434/v1' }
     }
   };
@@ -143,6 +154,7 @@
     var cfg = state.settings.providers[pid];
     // custom endpoints (Ollama etc.) don't need a key
     if (pid === 'custom') return !!cfg.baseUrl;
+    if (pid === 'device') return !!(window.ToplixLocal && window.ToplixLocal.available() && window.ToplixLocal.hasModel() && cfg.model && window.ToplixLocal.isInstalled(cfg.model));
     return !!(cfg && cfg.apiKey);
   }
 
@@ -412,15 +424,21 @@
     Object.keys(PROVIDERS).forEach(function (pid) {
       var p = PROVIDERS[pid];
       var cfg = state.settings.providers[pid];
+      if (pid === 'device' && !(window.ToplixLocal && window.ToplixLocal.available())) return;
       var group = el('div', 'model-menu-group', p.name);
       menu.appendChild(group);
+      if (pid === 'device' && !p.models.length) {
+        var none = el('button', 'model-menu-item', 'Download a model in Settings');
+        none.addEventListener('click', function () { $('#model-menu').classList.remove('open'); openSettings(); });
+        menu.appendChild(none);
+      }
       p.models.forEach(function (model) {
         var selected = pid === state.settings.activeProvider && model === cfg.model;
         var item = el('button', 'model-menu-item' + (selected ? ' selected' : ''));
         item.setAttribute('role', 'option');
         item.setAttribute('aria-selected', selected ? 'true' : 'false');
         item.dataset.testid = 'item-model-' + model.replace(/\//g, '-');
-        var name = el('span', 'model-name', model);
+        var name = el('span', 'model-name', pid === 'device' ? window.ToplixLocal.label(model) : model);
         item.appendChild(name);
         if (selected) {
           var check = el('span', 'model-check');
@@ -443,10 +461,12 @@
   function updateModelUI() {
     var p = activeProvider();
     var cfg = providerConfig();
-    $('#model-picker-label').textContent = cfg.model || p.defaultModel;
+    $('#model-picker-label').textContent = p.id === 'device'
+      ? (cfg.model ? window.ToplixLocal.label(cfg.model) : 'Local model')
+      : (cfg.model || p.defaultModel);
     $('#model-dot').classList.toggle('connected', isProviderConnected(p.id));
     $('#demo-banner').hidden = isProviderConnected(p.id);
-    $('#demo-provider-name').textContent = p.name.split('—')[0].trim();
+    $('#demo-provider-name').textContent = p.id === 'device' ? 'a local model (download one in Settings)' : p.name.split('—')[0].trim();
   }
 
   /* ---------------- Send / generate ---------------- */
@@ -518,7 +538,7 @@
     }
 
     // MCP tools connected: run the tool-calling loop (non-streaming rounds)
-    if (activeToolDefs().length) {
+    if (p.kind !== 'on-device' && activeToolDefs().length) {
       toolLoopGenerate(chat, msg, bodyEl);
       return;
     }
@@ -530,7 +550,8 @@
     history = history.slice(0, -1);
 
     var promise;
-    if (p.kind === 'openai-responses') promise = streamOpenAIResponses(p, cfg, history, msg, bodyEl);
+    if (p.kind === 'on-device') promise = streamOnDevice(p, cfg, history, msg, bodyEl);
+    else if (p.kind === 'openai-responses') promise = streamOpenAIResponses(p, cfg, history, msg, bodyEl);
     else if (p.kind === 'anthropic') promise = streamAnthropic(p, cfg, history, msg, bodyEl);
     else promise = streamOpenAIChat(p, cfg, history, msg, bodyEl);
 
@@ -737,6 +758,52 @@
         });
       });
     });
+  }
+
+  /* ---------------- On-device models (Android) ---------------- */
+  function streamOnDevice(p, cfg, history, msg, bodyEl) {
+    var L = window.ToplixLocal;
+    if (!L || !L.available()) return Promise.reject(new Error('Local models run in the Android app.'));
+    var first = true;
+    bodyEl.textContent = 'Starting\u2026';
+    return L.generate({
+      id: cfg.model,
+      messages: history.map(function (m) { return { role: m.role, content: m.content }; }),
+      system: state.settings.systemPrompt,
+      temperature: state.settings.temperature,
+      signal: state.abort.signal,
+      onStatus: function (t) { if (first) bodyEl.textContent = t; },
+      onToken: function (t) {
+        if (first) { first = false; msg.content = ''; }
+        msg.content += t;
+        bodyEl.innerHTML = window.ToplixMarkdown.render(msg.content);
+        wireCopyButtons(bodyEl);
+        scrollMessages();
+      }
+    }).then(function () {
+      if (first) { msg.content = '(The model returned no text.)'; bodyEl.textContent = msg.content; }
+    }, function (err) {
+      if (err && err.name === 'ConsentDeclined') { msg.content = 'Local models need your permission to run. Open Settings, choose the on-device provider and allow it.'; bodyEl.textContent = msg.content; return; }
+      throw err;
+    });
+  }
+
+  /* Ask a local server (Ollama, LM Studio) which models it has, so they show in the model picker */
+  function refreshCustomModels() {
+    var cfg = state.settings.providers.custom;
+    if (!cfg.baseUrl) return;
+    var ctl = new AbortController(); var t = setTimeout(function () { ctl.abort(); }, 2500);
+    fetch(cfg.baseUrl.replace(/\/+$/, '') + '/models', { signal: ctl.signal, headers: cfg.apiKey ? { Authorization: 'Bearer ' + cfg.apiKey } : {} })
+      .then(function (r) { clearTimeout(t); return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var ids = d && d.data ? d.data.map(function (m) { return m.id; }).filter(Boolean) : [];
+        if (!ids.length) return;
+        PROVIDERS.custom.models = ids;
+        PROVIDERS.custom.defaultModel = ids[0];
+        if (ids.indexOf(cfg.model) < 0) { cfg.model = ids[0]; persist(); }
+        renderModelMenu(); updateModelUI();
+      })
+      .catch(function () { clearTimeout(t); });
   }
 
   /* ---------------- Anthropic Messages API ---------------- */
@@ -1115,6 +1182,7 @@
       var p = PROVIDERS[pid];
       var cfg = state.settings.providers[pid];
 
+      if (pid === 'device' && !(window.ToplixLocal && window.ToplixLocal.available())) return;
       var card = el('div', 'provider-card' + (pid === state.settings.activeProvider ? ' active' : ''));
       card.dataset.provider = pid;
 
@@ -1129,6 +1197,18 @@
       top.appendChild(logo); top.appendChild(meta); top.appendChild(status);
       card.appendChild(top);
 
+      if (pid === 'device') {
+        var mgr = el('div', 'lm-mount');
+        card.appendChild(mgr);
+        window.ToplixLocal.mount(mgr, {});
+        var act = el('button', 'btn ghost');
+        act.textContent = pid === state.settings.activeProvider ? '\u2713 Active provider' : 'Use this provider';
+        act.style.marginTop = 'var(--space-3)';
+        act.addEventListener('click', function () { state.settings.activeProvider = pid; persist(); updateModelUI(); openSettings(); });
+        card.appendChild(act);
+        cards.appendChild(card);
+        return;
+      }
       var fields = el('div', 'provider-fields');
       var keyWrap = el('div', 'field-row span-2 key-wrap');
       var keyLabel = el('label', '', 'API key');
@@ -1222,6 +1302,7 @@
     if (wantDark !== (currentTheme() === 'dark')) toggleTheme();
     persist();
     refreshMcpTools();
+    refreshCustomModels();
     closeSettings();
     updateModelUI();
     renderModelMenu();
@@ -1365,6 +1446,16 @@
       renderModelMenu: renderModelMenu, updateModelUI: updateModelUI,
       applyChatGptSession: applyChatGptSession, isProviderConnected: isProviderConnected
     };
+    if (window.ToplixLocal) {
+      window.ToplixLocal.onChange(function () {
+        PROVIDERS.device.models = window.ToplixLocal.installed().map(function (m) { return m.id; });
+        var dcfg = state.settings.providers.device;
+        if (!dcfg.model && PROVIDERS.device.models.length) dcfg.model = PROVIDERS.device.models[0];
+        renderModelMenu(); updateModelUI();
+      });
+      window.ToplixLocal.init();
+    }
+    refreshCustomModels();
     if (window.ToplixOnboarding) window.ToplixOnboarding.start();
 
     // Start with an empty chat view

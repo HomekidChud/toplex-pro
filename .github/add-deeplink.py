@@ -23,4 +23,7 @@ queries = '''
 '''
 j = s.index('<application')
 s = s[:j] + queries.lstrip('\n') + '    ' + s[j:]
+# Allow plain-http connections to a local model server on the user's own network (Ollama, LM Studio)
+if 'usesCleartextTraffic' not in s:
+    s = s.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
 open(p, 'w').write(s)

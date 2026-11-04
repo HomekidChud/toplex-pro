@@ -240,7 +240,7 @@ public class ToplixNativePlugin extends Plugin {
        verified against the real host name, so this does not weaken security. */
     private static OkHttpClient client;
 
-    private static synchronized OkHttpClient httpClient() {
+    static synchronized OkHttpClient httpClient() {
         if (client == null) {
             final OkHttpClient bootstrap = new OkHttpClient.Builder()
                 .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)

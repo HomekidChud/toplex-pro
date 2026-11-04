@@ -1,10 +1,12 @@
 Toplix Pro __VERSION__ is now available on macOS, Windows, Linux and Android.
 
 ## What's new
-- Fixes the ChatGPT sign-in `invalid_grant` error. If ChatGPT rejects the first sign-in code, Toplix Pro now follows OpenAI's documented recovery: it discards the code and automatically starts one more authorization with the client ID issued to your app, then tells you to confirm again in the browser.
-- The Android network layer never resubmits a one-time sign-in code after a timeout.
-- If it still fails, the message now explains what to do instead of showing a bare error code.
-- Android updates install over the old version since 1.4.1 (permanent signing key). Sign-in network retries and DNS fallback from 1.4.1 carry over.
+- Run AI models on your phone (Android, 64-bit ARM). Open the first-run screen or Settings, choose "On this phone", and pick a model: Qwen2.5 0.5B or 1.5B, Gemma 3 1B (needs a free Hugging Face token) or a tiny test model. You can also import your own `.task` or `.litertlm` file.
+- Toplix Pro asks your permission before using the phone GPU, storing model files and downloading from huggingface.co. Android has no separate GPU permission, so the app asks itself. You can choose CPU only, and it falls back to CPU if the GPU cannot start.
+- Chats with a local model stay on the phone and work offline once the model is downloaded. Local models do not use tools.
+- The Custom provider now lists the models from Ollama or LM Studio automatically, and Android allows plain http addresses on your Wi-Fi (for example http://192.168.1.20:11434/v1).
+- Updates install over 1.4.1 and later without uninstalling. The APK is about 20 MB larger because of the on-device engine.
+- This is the first release of the on-device engine and has not been verified on every phone. Recent flagship phones (Pixel 8, Galaxy S23 or newer) work best.
 
 ## Downloads
 | Device | File |

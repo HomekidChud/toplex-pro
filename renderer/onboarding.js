@@ -169,6 +169,14 @@
     var keyBtn = providerCard({ cls: 'key', mark: '\u2022\u2022', title: 'I have an API key', sub: 'OpenAI, Anthropic, OpenRouter, Zhipu or a custom endpoint.' });
     card.appendChild(keyBtn);
 
+    // Local model on this phone (Android)
+    var localBtn = null;
+    if (window.ToplixLocal && window.ToplixLocal.available()) {
+      localBtn = providerCard({ cls: 'local', mark: 'AI', title: 'Run a model on this phone', badge: 'No account needed',
+        sub: 'Download a small model and run it on your phone\u2019s GPU, if you allow it. Works offline.' });
+      card.appendChild(localBtn);
+    }
+
     var panel = el('div', 'gate-panel'); panel.hidden = true;
     card.appendChild(panel);
     card.appendChild(error);
@@ -215,7 +223,7 @@
       f2.appendChild(keyLabel); f2.appendChild(key); panel.appendChild(f2);
 
       var f3 = el('div', 'gate-field');
-      f3.appendChild(el('label', '', 'Base URL'));
+      f3.appendChild(el('label', '', 'Base URL (on a phone, use your computer\u2019s Wi-Fi address)'));
       var url = el('input'); url.type = 'url'; f3.appendChild(url); panel.appendChild(f3);
 
       var help = el('button', 'link-btn gate-help', '');
@@ -259,6 +267,20 @@
           A().persist(); A().renderModelMenu(); A().updateModelUI();
           finish('Connected to ' + P[id].name.split(' \u2014 ')[0]);
         });
+      });
+    }
+
+    if (localBtn) {
+      localBtn.addEventListener('click', function () {
+        clearError();
+        panel.innerHTML = ''; panel.hidden = false;
+        panel.appendChild(el('p', 'gate-note', 'Pick a model, download it, then tap Use. You\u2019ll be asked before the GPU is used.'));
+        var host = el('div', 'lm-mount');
+        panel.appendChild(host);
+        window.ToplixLocal.mount(host, { onUse: function () {
+          window.ToplixStore.set(ONBOARDED_KEY, '1');
+          finish('Local model ready');
+        } });
       });
     }
 
