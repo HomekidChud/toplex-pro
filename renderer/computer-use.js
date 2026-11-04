@@ -117,19 +117,19 @@
       {
         _computer: true,
         name: 'browser_read_page',
-        description: 'Read the active AI Browser page: title, URL, visible text (up to 12,000 chars) and the first links. Use this after navigating or clicking to see what the page says.',
+        description: 'Read the active AI Browser page: title, URL, visible text (up to 12,000 chars), the first links, and a list of clickable elements with their exact x,y coordinates (tag "text" @ x,y). Use this after navigating or clicking to see what the page says — and use the listed element coordinates with browser_click.',
         input_schema: { type: 'object', properties: {}, required: [] }
       },
       {
         _computer: true,
         name: 'browser_screenshot',
-        description: 'Save a PNG screenshot of the active AI Browser page and get its file path. Coordinates on the screenshot match the x/y coordinates used by browser_click.',
+        description: 'Save a PNG screenshot of the active AI Browser page and get its file path — this is for the USER to look at; you cannot see images. To understand or act on the page, use browser_read_page (it gives you clickable elements with x,y coordinates) or browser_click_selector instead.',
         input_schema: { type: 'object', properties: {}, required: [] }
       },
       {
         _computer: true,
         name: 'browser_click',
-        description: 'Move your own AI cursor to x,y and click there in the AI Browser. The user sees the cursor move and a click ripple. Get coordinates from browser_screenshot, or use browser_click_selector to click by CSS selector instead.',
+        description: 'Move your own AI cursor to x,y and click there in the AI Browser. The user sees the cursor move and a click ripple. Get x,y from browser_read_page\'s "Clickable elements" list (most reliable), or use browser_click_selector to click by CSS selector instead. The result tells you which element was actually hit.',
         input_schema: {
           type: 'object',
           properties: {

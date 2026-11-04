@@ -665,7 +665,7 @@
     return window.ToplixComputer.toolDefs();
   }
 
-  var COMPUTER_RULES = '\n\nYou currently have Computer Use tools. File tools: computer_list_files, computer_read_file, computer_write_file, computer_run_command. Apps: computer_list_apps, computer_open_app, computer_open_url. Your own browser and mouse: browser_open, browser_read_page, browser_screenshot, browser_click, browser_click_selector, browser_type, browser_key, browser_scroll, browser_tabs, browser_new_tab, browser_close_tab, browser_back, browser_forward, ai_mouse_move.\n\nRules: only access folders the user approved — unless they switched on full computer access, then any folder is allowed; never try to read credentials, SSH keys, keychains, .env files or this app\'s own data (always blocked); in manual approval mode every write, command and app launch needs the user\'s approval in a dialog, so state clearly what you intend to do — in "approve for me" (auto) mode those are approved automatically but the audit log still records everything; you have your own embedded Chromium browser with your own visible mouse cursor — use it to browse, open tabs and act on pages, and never touch the user\'s real mouse or their own browser; never attempt to bypass these limits (no sudo, no tricks to reach protected paths, no sending the user\'s files to remote servers); if a task is blocked by these rules, say so and suggest what the user can do instead.';
+  var COMPUTER_RULES = '\n\nYou currently have Computer Use tools. File tools: computer_list_files, computer_read_file, computer_write_file, computer_run_command. Apps: computer_list_apps, computer_open_app, computer_open_url. Your own browser and mouse: browser_open, browser_read_page, browser_screenshot, browser_click, browser_click_selector, browser_type, browser_key, browser_scroll, browser_tabs, browser_new_tab, browser_close_tab, browser_back, browser_forward, ai_mouse_move.\n\nBrowser tips: browser_read_page returns the page text AND a list of clickable elements with their exact x,y coordinates — pass those to browser_click; browser_click_selector is even more reliable; browser_screenshot saves a picture for the user but you cannot see images, so do not rely on it for coordinates.\n\nRules: only access folders the user approved — unless they switched on full computer access, then any folder is allowed; never try to read credentials, SSH keys, keychains, .env files or this app\'s own data (always blocked); in manual approval mode every write, command and app launch needs the user\'s approval in a dialog, so state clearly what you intend to do — in "approve for me" (auto) mode those are approved automatically but the audit log still records everything; you have your own embedded Chromium browser with your own visible mouse cursor — use it to browse, open tabs and act on pages, and never touch the user\'s real mouse or their own browser; never attempt to bypass these limits (no sudo, no tricks to reach protected paths, no sending the user\'s files to remote servers); if a task is blocked by these rules, say so and suggest what the user can do instead.';
 
   function systemPromptNow() {
     var base = state.settings.systemPrompt || '';
@@ -1236,7 +1236,32 @@
   }
 
   async function anthropicTools(p, cfg, history, defs) {
-    var messages = history.filter(function (m) { return m.role !== 'system' && !m._raw; });
+    // Anthropic rejects empty content blocks, and requires the first message to
+    // be from the user; normalize what the chat history gives us.
+    var messages = history
+      .filter(function (m) { return m.role !== 'system' && !m._raw; })
+      .map(function (m) {
+        var content = m.content;
+        if (content === null || content === undefined || content === '') content = ' ';
+        return { role: m.role, content: content };
+      });
+    // Anthropic also requires strict user/assistant alternation — merge any
+    // consecutive messages with the same role (e.g. two user messages in a row
+    // after an errored reply was dropped).
+    var merged = [];
+    messages.forEach(function (m) {
+      var last = merged[merged.length - 1];
+      if (last && last.role === m.role) {
+        if (Array.isArray(last.content) || Array.isArray(m.content)) {
+          last.content = [].concat(last.content || [], m.content || []);
+        } else {
+          last.content = String(last.content) + '\n\n' + String(m.content);
+        }
+      } else {
+        merged.push({ role: m.role, content: m.content });
+      }
+    });
+    messages = merged;
     var res = await fetch(cfg.baseUrl + '/messages', {
       method: 'POST', signal: state.abort.signal,
       headers: {
@@ -1276,7 +1301,18 @@
   }
 
   async function openaiChatTools(p, cfg, history, defs) {
-    var messages = history.map(function (m) { return { role: m.role, content: m.content }; });
+    // Preserve tool_calls / tool_call_id / name: the tool loop appends proper
+    // OpenAI-format messages to the history, and stripping them here made every
+    // follow-up round invalid (assistant message with no tool_calls, tool
+    // result with no tool_call_id) — most providers then 400 or the model
+    // loses track of its own tool results.
+    var messages = history.map(function (m) {
+      var out = { role: m.role, content: m.content };
+      if (m.tool_calls) out.tool_calls = m.tool_calls;
+      if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
+      if (m.name) out.name = m.name;
+      return out;
+    });
     if (systemPromptNow()) messages.unshift({ role: "system", content: systemPromptNow() });
     var res = await fetch(cfg.baseUrl + '/chat/completions', {
       method: 'POST', signal: state.abort.signal,
@@ -1341,8 +1377,10 @@
           : '_(using connected tools)_');
         var res = await requestWithTools(p, cfg, history, defs);
         if (res.text) meterAdd(res.text);
+        // keep any text the model writes between tool calls (it was lost before)
+        if (res.text) msg.content = (msg.content && msg.content !== '*(empty response)*' ? msg.content + '\n\n' : '') + res.text;
         if (!res.toolCalls.length) {
-          msg.content = res.text || '*(empty response)*';
+          msg.content = res.text || msg.content || '*(empty response)*';
           break;
         }
         for (var i = 0; i < res.toolCalls.length; i++) {

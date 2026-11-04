@@ -266,25 +266,45 @@ function cuIsProtected(abs) {
   return false;
 }
 
+// Expand a leading ~ to the user's home folder (models often write ~/Documents)
+function cuExpandUser(p) {
+  if (typeof p !== 'string' || !p) return p;
+  const home = app.getPath('home');
+  if (p === '~') return home;
+  if (p.startsWith('~/') || p.startsWith('~\\')) return path.join(home, p.slice(2));
+  return p;
+}
+
+// Default folder when the model passes "." or nothing: first approved root, else home
+function cuDefaultDir(cfg) {
+  if (cfg.fullAccess) return app.getPath('home');
+  return (cfg.roots && cfg.roots[0]) || app.getPath('home');
+}
+
 // Resolve a path the model asked for; it must land inside an approved root
 // (unless the user switched on full computer access).
 function cuResolve(p) {
   const cfg = cuConfig();
-  if (!cfg.fullAccess) {
+  if (typeof p !== 'string' || !p.trim()) {
+    return { ok: false, error: 'Give an absolute file path (e.g. ' + path.join(app.getPath('home'), 'Documents', 'notes.txt') + ').' };
+  }
+  p = cuExpandUser(p.trim());
   const roots = (cfg.roots || []).map((r) => {
     try { return fs.realpathSync(r); } catch (e) { return path.resolve(r); }
   });
   let abs;
   try { abs = fs.realpathSync(path.resolve(p)); } catch (e) { abs = path.resolve(p); } // new files may not exist yet
   const root = roots.find((r) => abs === r || abs.startsWith(r + path.sep));
-  if (!root) return { ok: false, error: 'That path is outside the folders approved for computer use. Ask the user to add the folder in Settings, or to switch on full computer access.' };
+  if (!cfg.fullAccess && !root) {
+    return {
+      ok: false,
+      error: 'That path is outside the folders approved for computer use.' +
+        (roots.length ? ' Approved folders: ' + roots.join(' ; ') : ' No folders have been approved yet.') +
+        ' Ask the user to approve the folder in Settings, or to switch on full computer access.'
+    };
+  }
   if (cuIsProtected(abs)) return { ok: false, error: 'That path holds credentials or app data and is never available to computer use.' };
-  return { ok: true, abs, root };
-  } // end !fullAccess branch
-  let abs2;
-  try { abs2 = fs.realpathSync(path.resolve(p)); } catch (e) { abs2 = path.resolve(p); }
-  if (cuIsProtected(abs2)) return { ok: false, error: 'That path holds credentials or app data and is never available to computer use.' };
-  return { ok: true, abs: abs2, root: null };
+  return { ok: true, abs, root: root || null };
 }
 
 /* Approval gate. Manual mode asks every time (with an "Approve for me"
@@ -649,6 +669,21 @@ async function browserEnsure() {
   return tab;
 }
 
+/* Wait for the page to finish loading (or fail / time out) so the model is not
+ * told a page is ready while it is still blank. */
+function browserWaitLoad(tab, ms) {
+  return new Promise((resolve) => {
+    if (!tab || !tab.win || tab.win.isDestroyed()) return resolve();
+    const wc = tab.win.webContents;
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    if (!wc.isLoadingMainFrame()) return finish();
+    wc.once('did-finish-load', finish);
+    wc.once('did-fail-load', finish);
+    setTimeout(finish, ms || 12000);
+  });
+}
+
 function browserCursor(tab, x, y) {
   if (!tab || tab.overlay.isDestroyed()) return;
   tab.overlay.webContents.executeJavaScript('aiShow();aiMove(' + Math.round(x) + ',' + Math.round(y) + ');', true).catch(() => {});
@@ -675,7 +710,7 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
   tool = String(tool || '').replace(/^computer_/, '');
 
   if (tool === 'list_files') {
-    const r = cuResolve(args.path || '.');
+    const r = cuResolve(args.path || cuDefaultDir(cfg));
     if (!r.ok) return r;
     let names;
     try { names = fs.readdirSync(r.abs, { withFileTypes: true }); }
@@ -728,7 +763,7 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
       cuLog({ tool, detail: command.slice(0, 200) + ' (blocked)', allowed: false });
       return { ok: false, error: 'That command is blocked by the computer-use safety rules (it looks elevated, destructive or self-hiding).' };
     }
-    const cwdR = cuResolve(args.cwd || '.');
+    const cwdR = cuResolve(args.cwd || cuDefaultDir(cfg));
     if (!cwdR.ok) return cwdR;
     const allowed = await cuApprove(
       'Run command',
@@ -763,8 +798,10 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
     const url = browserNormalizeUrl(args.url);
     if (tab.url !== url) tab.win.loadURL(url);
     tab.win.show();
+    // wait for the page to finish loading so the next read/click works
+    await browserWaitLoad(tab, 15000);
     cuLog({ tool, detail: url, allowed: true });
-    return { ok: true, result: 'Opened ' + url + ' in the AI Browser (tab ' + tab.id + '). The page is loading — use browser_read_page to read it, browser_screenshot to save a picture, or browser_click / browser_type to act on it with your own mouse cursor.' };
+    return { ok: true, result: 'Opened ' + url + ' in the AI Browser (tab ' + tab.id + ') and it has finished loading. Use browser_read_page to read it (it also lists clickable elements with their x,y coordinates for browser_click), or browser_click / browser_click_selector to act on it with your own mouse cursor.' };
   }
 
   if (tool === 'browser_new_tab') {
@@ -791,11 +828,18 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
 
   if (tool === 'browser_read_page') {
     const tab = await browserEnsure();
+    // if the page is still loading, give it a moment so we do not read a blank page
+    await browserWaitLoad(tab, 10000);
     let info;
     try {
       const raw = await tab.win.webContents.executeJavaScript(
         '(function(){var t=document.body?document.body.innerText:"";' +
+        'var els=Array.prototype.slice.call(document.querySelectorAll("a,button,input,select,textarea,[role=button],[onclick]"),0,80).map(function(e){' +
+        'try{var r=e.getBoundingClientRect();if(r.width<2||r.height<2)return null;' +
+        'var txt=(e.innerText||e.value||e.placeholder||e.getAttribute("aria-label")||"").trim().slice(0,50);' +
+        'return e.tagName.toLowerCase()+" \""+txt+"\" @ "+Math.round(r.x+r.width/2)+","+Math.round(r.y+r.height/2);}catch(err){return null;}}).filter(Boolean);' +
         'return JSON.stringify({title:document.title,url:location.href,text:t.slice(0,12000),textLen:t.length,' +
+        'els:els,' +
         'links:Array.prototype.slice.call(document.querySelectorAll("a"),0,40).map(function(a){return (a.innerText||"").trim().slice(0,60)+" -> "+a.href;})});})()',
         true
       );
@@ -807,12 +851,14 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
     return {
       ok: true,
       result: 'Page: ' + info.title + '\nURL: ' + info.url + '\n\nText (' + info.textLen + ' chars' + (info.textLen > 12000 ? ', first 12000 shown' : '') + '):\n' + (info.text || '(no text)') +
+        (info.els && info.els.length ? '\n\nClickable elements (tag "text" @ x,y — pass those coordinates to browser_click):\n' + info.els.map((l) => '- ' + l).join('\n') : '') +
         (info.links && info.links.length ? '\n\nLinks:\n' + info.links.map((l) => '- ' + l).join('\n') : '')
     };
   }
 
   if (tool === 'browser_screenshot') {
     const tab = await browserEnsure();
+    await browserWaitLoad(tab, 10000);
     try {
       const img = await tab.win.webContents.capturePage();
       const dir = path.join(app.getPath('userData'), 'screenshots');
@@ -829,10 +875,25 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
   if (tool === 'browser_click' || tool === 'ai_mouse_click') {
     const tab = await browserEnsure();
     const x = Number(args.x), y = Number(args.y);
-    if (!isFinite(x) || !isFinite(y)) return { ok: false, error: 'Give numeric x and y coordinates (pixels from the top-left of the AI Browser window). Use browser_screenshot to see where things are.' };
-    await browserClick(tab, x, y);
-    cuLog({ tool, detail: 'click @ ' + x + ',' + y + ' (' + tab.url + ')', allowed: true });
-    return { ok: true, result: 'Clicked at ' + Math.round(x) + ',' + Math.round(y) + ' in the AI Browser with the AI cursor (the user saw the cursor move and a click ripple). Use browser_read_page to see what changed.' };
+    if (!isFinite(x) || !isFinite(y)) return { ok: false, error: 'Give numeric x and y coordinates (pixels from the top-left of the AI Browser window). Use browser_read_page — it lists clickable elements with their x,y coordinates.' };
+    await browserWaitLoad(tab, 10000);
+    // clamp to the visible page so an out-of-range coordinate still clicks the nearest edge
+    const size = tab.win.getContentSize();
+    const cx = Math.max(0, Math.min(Math.round(x), (size[0] || 1280) - 1));
+    const cy = Math.max(0, Math.min(Math.round(y), (size[1] || 720) - 1));
+    // what is under the point? tell the model what it actually clicked
+    let hit = '';
+    try {
+      hit = await tab.win.webContents.executeJavaScript(
+        '(function(){var e=document.elementFromPoint(' + cx + ',' + cy + ');if(!e)return "";' +
+        'var t=(e.innerText||e.value||e.getAttribute("aria-label")||"").trim().slice(0,60);' +
+        'return e.tagName.toLowerCase()+(t?" \\""+t+"\\"":"");})()',
+        true
+      );
+    } catch (e) { /* best-effort */ }
+    await browserClick(tab, cx, cy);
+    cuLog({ tool, detail: 'click @ ' + cx + ',' + cy + ' (' + tab.url + ')', allowed: true });
+    return { ok: true, result: 'Clicked at ' + cx + ',' + cy + ' in the AI Browser with the AI cursor' + (hit ? ' — it hit a ' + hit : '') + '. Use browser_read_page to see what changed.' };
   }
 
   if (tool === 'ai_mouse_move') {
@@ -868,20 +929,39 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
     const tab = await browserEnsure();
     const text = String(args.text == null ? '' : args.text);
     if (!text) return { ok: false, error: 'Nothing to type — give the text.' };
+    await browserWaitLoad(tab, 10000);
     tab.win.focus();
+    // if nothing is focused, focus the first editable field so the text lands somewhere
+    try {
+      await tab.win.webContents.executeJavaScript(
+        '(function(){var a=document.activeElement;' +
+        'if(a&&(a.tagName==="INPUT"||a.tagName==="TEXTAREA"||a.isContentEditable))return "ok";' +
+        'var e=document.querySelector("input:not([type=hidden]):not([disabled]),textarea:not([disabled]),[contenteditable=true]");' +
+        'if(e){e.focus();return "focused"}return "none";})()',
+        true
+      );
+    } catch (e) { /* best-effort */ }
     tab.win.webContents.insertText(text);
     cuLog({ tool, detail: 'typed ' + text.length + ' chars (' + tab.url + ')', allowed: true });
-    return { ok: true, result: 'Typed ' + text.length + ' characters into the focused field in the AI Browser.' };
+    return { ok: true, result: 'Typed ' + text.length + ' characters into the AI Browser (first editable field if none was focused). Use browser_read_page to see what changed.' };
   }
 
   if (tool === 'browser_key' || tool === 'ai_key') {
     const tab = await browserEnsure();
-    const key = String(args.key || 'Enter');
+    // accept the aliases models actually send ("enter", "return", "esc", "ctrl+a", …)
+    var KEY_ALIASES = { enter: 'Enter', return: 'Enter', '\n': 'Enter', esc: 'Escape', escape: 'Escape', del: 'Delete', 'delete': 'Delete', backspace: 'Backspace', space: 'Space', tab: 'Tab', left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown' };
+    var rawKey = String(args.key == null ? 'Enter' : args.key).trim();
+    var parts = rawKey.toLowerCase().split('+').map(function (s) { return s.trim(); }).filter(Boolean);
+    var modifiers = parts.slice(0, -1).map(function (m) {
+      return { ctrl: 'Control', control: 'Control', alt: 'Alt', option: 'Alt', shift: 'Shift', meta: 'Meta', cmd: 'Meta', super: 'Meta', win: 'Meta' }[m] || null;
+    }).filter(Boolean);
+    var keyName = parts[parts.length - 1] || 'Enter';
+    keyName = KEY_ALIASES[keyName] || keyName.charAt(0).toUpperCase() + keyName.slice(1);
     tab.win.focus();
     const wc = tab.win.webContents;
-    wc.sendInputEvent({ type: 'keyDown', keyCode: key });
-    wc.sendInputEvent({ type: 'keyUp', keyCode: key });
-    return { ok: true, result: 'Sent key "' + key + '" to the AI Browser.' };
+    wc.sendInputEvent({ type: 'keyDown', keyCode: keyName, modifiers: modifiers });
+    wc.sendInputEvent({ type: 'keyUp', keyCode: keyName, modifiers: modifiers });
+    return { ok: true, result: 'Sent key "' + rawKey + '" to the AI Browser.' };
   }
 
   if (tool === 'browser_scroll') {
@@ -902,9 +982,12 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
     return { ok: true, result: (tool === 'browser_back' ? 'Went back' : 'Went forward') + ' in the AI Browser.' };
   }
 
-  /* ---------- Open apps / anything ---------- */
+  /* ---------- Open apps / anything ----------
+   * (the computer_ prefix was already stripped above, so these check the bare
+   * names — the old code checked "computer_open_app" and could never match,
+   * which silently broke all three app tools) ---------- */
 
-  if (tool === 'computer_open_app') {
+  if (tool === 'open_app' || tool === 'computer_open_app') {
     const name = String(args.name || '').trim();
     if (!name) return { ok: false, error: 'Give the app name, e.g. "Safari", "Calculator", "VS Code".' };
     const allowed = await cuApprove(
@@ -934,7 +1017,7 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
     return { ok: true, result: 'App "' + name + '" is opening.' };
   }
 
-  if (tool === 'computer_list_apps') {
+  if (tool === 'list_apps' || tool === 'computer_list_apps') {
     const names = new Set();
     try {
       const home = app.getPath('home');
@@ -976,7 +1059,7 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
     return { ok: true, result: 'Installed apps (use the exact name with computer_open_app):\n' + sorted.slice(0, 400).join('\n') + (sorted.length > 400 ? '\n… truncated at 400 of ' + sorted.length : '') };
   }
 
-  if (tool === 'computer_open_url') {
+  if (tool === 'open_url' || tool === 'computer_open_url') {
     const url = browserNormalizeUrl(args.url);
     const where = args.where === 'default' ? 'default' : 'browser';
     if (where === 'default') {
@@ -991,8 +1074,9 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
     }
     const tab = await browserEnsure();
     tab.win.loadURL(url);
+    await browserWaitLoad(tab, 15000);
     cuLog({ tool, detail: url + ' (AI Browser)', allowed: true });
-    return { ok: true, result: 'Opened ' + url + ' in the AI Browser.' };
+    return { ok: true, result: 'Opened ' + url + ' in the AI Browser and it has finished loading. Use browser_read_page to see its content.' };
   }
 
   return { ok: false, error: 'Unknown tool: ' + tool };
