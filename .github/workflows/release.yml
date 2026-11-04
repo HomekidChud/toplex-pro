@@ -88,20 +88,33 @@ jobs:
           sed -i "s/versionCode 1/versionCode $CODE/; s/versionName \"1.0\"/versionName \"$VERSION\"/" android/app/build.gradle
           python3 ../.github/add-deeplink.py android/app/src/main/AndroidManifest.xml
           cp native/ToplixNativePlugin.java native/MainActivity.java android/app/src/main/java/com/homekidchud/toplexpro/
+          # HTTP client used for the ChatGPT sign-in calls (with DNS fallback)
+          sed -i '0,/^dependencies {/s//dependencies {\n    implementation "com.squareup.okhttp3:okhttp:4.12.0"/' android/app/build.gradle
 
       - name: Sync web assets
         working-directory: mobile
         run: npx cap sync android
 
-      - name: Build APK
+      - name: Build release APK
         working-directory: mobile/android
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleRelease -x lintVitalRelease --no-daemon
 
-      - name: Name the APK
+      - name: Sign APK with the permanent key
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
+          set -e
           VERSION=$(node -p "require('./package.json').version")
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          echo "$KS_B64" | base64 -d > /tmp/release.p12
+          UNSIGNED=$(ls mobile/android/app/build/outputs/apk/release/*.apk | head -1)
+          $BT/zipalign -p -f 4 "$UNSIGNED" /tmp/aligned.apk
           mkdir -p out
-          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk "out/Toplix-Pro-${VERSION}-android.apk"
+          $BT/apksigner sign --ks /tmp/release.p12 --ks-type pkcs12 --ks-key-alias toplix \
+            --ks-pass env:KS_PASS --out "out/Toplix-Pro-${VERSION}-android.apk" /tmp/aligned.apk
+          $BT/apksigner verify --print-certs "out/Toplix-Pro-${VERSION}-android.apk" | head -3
+          rm -f /tmp/release.p12
 
       - uses: actions/upload-artifact@v4
         with: { name: android, path: out/*.apk, if-no-files-found: error }

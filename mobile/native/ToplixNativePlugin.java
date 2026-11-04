@@ -14,6 +14,13 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import okhttp3.Dns;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -192,39 +199,85 @@ public class ToplixNativePlugin extends Plugin {
         }
         io.execute(() -> {
             try {
-                HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-                c.setRequestMethod(method);
-                c.setConnectTimeout(15000);
-                c.setReadTimeout(30000);
+                Request.Builder rb = new Request.Builder().url(url);
                 if (headers != null) {
                     Iterator<String> it = headers.keys();
                     while (it.hasNext()) {
                         String k = it.next();
-                        c.setRequestProperty(k, headers.getString(k));
+                        rb.header(k, headers.getString(k));
                     }
                 }
                 if (body != null) {
-                    c.setDoOutput(true);
-                    try (OutputStream os = c.getOutputStream()) {
-                        os.write(body.getBytes(StandardCharsets.UTF_8));
+                    String ct = headers != null && headers.has("Content-Type") ? headers.getString("Content-Type") : "application/json";
+                    rb.method(method, RequestBody.create(body.getBytes(StandardCharsets.UTF_8), MediaType.parse(ct)));
+                } else {
+                    rb.method(method, "GET".equals(method) || "HEAD".equals(method) ? null : RequestBody.create(new byte[0], null));
+                }
+                Exception last = null;
+                for (int attempt = 0; attempt < 3; attempt++) {
+                    try (Response resp = httpClient().newCall(rb.build()).execute()) {
+                        JSObject r = new JSObject();
+                        r.put("status", resp.code());
+                        r.put("text", resp.body() != null ? resp.body().string() : "");
+                        call.resolve(r);
+                        return;
+                    } catch (java.net.UnknownHostException | java.net.SocketTimeoutException | java.net.ConnectException e) {
+                        last = e;
+                        try { Thread.sleep(800L * (attempt + 1)); } catch (InterruptedException ie) { break; }
                     }
                 }
-                int status = c.getResponseCode();
-                InputStream is = status >= 400 ? c.getErrorStream() : c.getInputStream();
-                ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                if (is != null) {
-                    byte[] buf = new byte[4096];
-                    int n;
-                    while ((n = is.read(buf)) != -1) bos.write(buf, 0, n);
-                }
-                JSObject r = new JSObject();
-                r.put("status", status);
-                r.put("text", new String(bos.toByteArray(), StandardCharsets.UTF_8));
-                call.resolve(r);
+                call.reject("Could not reach " + new URL(url).getHost() + ". Check that this phone is online and that no VPN, private DNS or ad blocker is blocking it. (" + (last != null ? last.getMessage() : "unknown") + ")");
             } catch (Exception e) {
                 call.reject("Network error: " + e.getMessage());
             }
         });
+    }
+
+    /* Uses the phone's DNS first. If that cannot resolve the host (some private DNS, VPN or
+       filter setups), falls back to DNS-over-HTTPS from Cloudflare and Google. TLS is still
+       verified against the real host name, so this does not weaken security. */
+    private static OkHttpClient client;
+
+    private static synchronized OkHttpClient httpClient() {
+        if (client == null) {
+            final OkHttpClient bootstrap = new OkHttpClient.Builder()
+                .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
+            Dns dns = host -> {
+                try {
+                    return Dns.SYSTEM.lookup(host);
+                } catch (java.net.UnknownHostException first) {
+                    String[] resolvers = {
+                        "https://1.1.1.1/dns-query?type=A&name=",
+                        "https://8.8.8.8/resolve?type=A&name="
+                    };
+                    for (String base : resolvers) {
+                        try {
+                            Request req = new Request.Builder().url(base + host)
+                                .header("Accept", "application/dns-json").build();
+                            try (Response r = bootstrap.newCall(req).execute()) {
+                                if (!r.isSuccessful() || r.body() == null) continue;
+                                org.json.JSONArray ans = new org.json.JSONObject(r.body().string()).optJSONArray("Answer");
+                                java.util.ArrayList<InetAddress> out = new java.util.ArrayList<>();
+                                if (ans != null) for (int i = 0; i < ans.length(); i++) {
+                                    org.json.JSONObject o = ans.getJSONObject(i);
+                                    if (o.optInt("type") == 1) out.add(InetAddress.getByAddress(host, InetAddress.getByName(o.getString("data")).getAddress()));
+                                }
+                                if (!out.isEmpty()) return out;
+                            }
+                        } catch (Exception ignored) { }
+                    }
+                    throw first;
+                }
+            };
+            client = new OkHttpClient.Builder()
+                .dns(dns)
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
+        }
+        return client;
     }
 
     /* ---------------- Secure storage ---------------- */
