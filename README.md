@@ -84,6 +84,15 @@ npm install
 npm start
 ```
 
+## The model brain — ToplixPro.md
+
+`renderer/ToplixPro.md` is the master instruction set for every Toplix Pro
+model: identity, operating principles, the computer-use playbooks (files,
+commands, apps, the AI Browser), tool discipline and safety rules. It is read
+by the preload script and prepended to every request's system prompt — before
+the user's own prompt and the computer-use rules. Edit that file to change how
+every model in the app thinks and works.
+
 ## Building on other platforms
 
 The app is a standard Electron project — `npx electron-builder` on Windows or Linux produces those platforms' installers. DMGs can only be built on macOS (or via the included GitHub Actions workflow, which builds both Apple Silicon and Intel DMGs automatically).

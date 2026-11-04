@@ -1,5 +1,14 @@
 /* Toplix Pro — preload (contextIsolation bridge) */
 const { contextBridge, ipcRenderer } = require('electron');
+const path = require('path');
+const fs = require('fs');
+
+// The master instruction brain (renderer/ToplixPro.md) is read here because
+// the sandboxed renderer cannot fetch file:// URLs, and handed to the page
+// as a plain string.
+let brainText = '';
+try { brainText = fs.readFileSync(path.join(__dirname, 'renderer', 'ToplixPro.md'), 'utf8'); } catch (e) { /* optional */ }
+contextBridge.exposeInMainWorld('toplexBrain', { text: brainText });
 
 contextBridge.exposeInMainWorld('toplex', {
   isDesktop: true,

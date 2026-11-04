@@ -652,6 +652,16 @@
   }
 
   /* ---------------- Modes: normal chat / computer use ---------------- */
+
+  /* The master instruction brain — shipped as renderer/ToplixPro.md and read
+   * by the preload script (the sandboxed renderer cannot fetch file:// URLs).
+   * It is prepended to every request, before the user's own system prompt. */
+  var BRAIN = '';
+  try {
+    var brainText = window.toplexBrain && window.toplexBrain.text;
+    if (brainText && /^#\s+Toplix Pro/m.test(String(brainText))) BRAIN = String(brainText).trim();
+  } catch (e) { /* stay on the built-in prompt */ }
+
   function computerAvailable() {
     return !!(window.ToplixComputer && window.ToplixComputer.available());
   }
@@ -667,9 +677,14 @@
 
   var COMPUTER_RULES = '\n\nYou currently have Computer Use tools. File tools: computer_list_files, computer_read_file, computer_write_file, computer_run_command. Apps: computer_list_apps, computer_open_app, computer_open_url. Your own browser and mouse: browser_open, browser_read_page, browser_screenshot, browser_click, browser_click_selector, browser_type, browser_key, browser_scroll, browser_tabs, browser_new_tab, browser_close_tab, browser_back, browser_forward, ai_mouse_move.\n\nBrowser tips: browser_read_page returns the page text AND a list of clickable elements with their exact x,y coordinates — pass those to browser_click; browser_click_selector is even more reliable; browser_screenshot saves a picture for the user but you cannot see images, so do not rely on it for coordinates.\n\nRules: only access folders the user approved — unless they switched on full computer access, then any folder is allowed; never try to read credentials, SSH keys, keychains, .env files or this app\'s own data (always blocked); in manual approval mode every write, command and app launch needs the user\'s approval in a dialog, so state clearly what you intend to do — in "approve for me" (auto) mode those are approved automatically but the audit log still records everything; you have your own embedded Chromium browser with your own visible mouse cursor — use it to browse, open tabs and act on pages, and never touch the user\'s real mouse or their own browser; never attempt to bypass these limits (no sudo, no tricks to reach protected paths, no sending the user\'s files to remote servers); if a task is blocked by these rules, say so and suggest what the user can do instead.';
 
+  /* Every request gets: the master brain, then the user's own prompt, then
+   * (in computer mode) the computer-use rules. */
   function systemPromptNow() {
-    var base = state.settings.systemPrompt || '';
-    return computerActive() ? base + COMPUTER_RULES : base;
+    var parts = [];
+    if (BRAIN) parts.push(BRAIN);
+    if (state.settings.systemPrompt) parts.push(state.settings.systemPrompt);
+    if (computerActive()) parts.push(COMPUTER_RULES);
+    return parts.join('\n\n');
   }
 
   function updateModeUI() {
