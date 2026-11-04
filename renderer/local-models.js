@@ -12,26 +12,26 @@
   var CATALOG = [
     {
       id: 'qwen2.5-0.5b-instruct', name: 'Qwen2.5 0.5B Instruct', size: '547 MB', minRamGb: 3,
-      note: 'Small and fast. Good for quick questions and short code.',
+      note: 'Small and fast. Good for quick questions and short code. Published as a CPU build, so the GPU may not work with it.',
       url: HF + 'Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
       template: 'chatml', maxTokens: 1280
     },
     {
       id: 'qwen2.5-1.5b-instruct', name: 'Qwen2.5 1.5B Instruct', size: '1.6 GB', minRamGb: 6,
-      note: 'Noticeably smarter, needs a recent phone with 6 GB of RAM or more.',
+      note: 'Noticeably smarter, needs a recent phone with 6 GB of RAM or more. Published as a CPU build, so the GPU may not work with it.',
       url: HF + 'Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.task',
       template: 'chatml', maxTokens: 4096
     },
     {
       id: 'gemma3-1b-it', name: 'Gemma 3 1B', size: '555 MB', minRamGb: 4, gated: true,
-      note: 'Google\u2019s small model. Needs a free Hugging Face account and token (license acceptance).',
+      note: 'Google\u2019s small model, and the one Google documents for the GPU. Needs a free Hugging Face account and token (licence acceptance).',
       page: 'https://huggingface.co/litert-community/Gemma3-1B-IT',
       url: HF + 'Gemma3-1B-IT/resolve/main/Gemma3-1B-IT_multi-prefill-seq_q4_ekv2048.task',
       template: 'gemma', maxTokens: 2048
     },
     {
       id: 'smollm-135m-instruct', name: 'SmolLM 135M (tiny test model)', size: '167 MB', minRamGb: 2,
-      note: 'Very small. Use it to check that your phone and GPU work before downloading a bigger model.',
+      note: 'Very small. Use it to check that your phone works before downloading a bigger model. CPU build.',
       url: HF + 'SmolLM-135M-Instruct/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task',
       template: 'chatml', maxTokens: 1280
     }
@@ -61,7 +61,14 @@
     window.ToplixStore.set(CONSENT_KEY, JSON.stringify(Object.assign({ v: CONSENT_VERSION, at: new Date().toISOString() }, c)));
   }
   function hasConsent() { var c = readConsent(); return !!(c && c.v === CONSENT_VERSION); }
-  function gpuEnabled() { var c = readConsent(); return !!(c && c.gpu); }
+  function gpuEnabled() { var c = readConsent(); return !!(c && c.gpu) && !(status && status.gpuBlocked); }
+  function gpuAllowed() { var c = readConsent(); return !!(c && c.gpu); }
+  var GPUERR_KEY = 'toplex.local.gpuerr';
+  function lastGpuError() { try { return JSON.parse(window.ToplixStore.get(GPUERR_KEY) || 'null'); } catch (e) { return null; } }
+  function rememberGpuError(model, msg) {
+    if (!msg) { window.ToplixStore.remove(GPUERR_KEY); return; }
+    window.ToplixStore.set(GPUERR_KEY, JSON.stringify({ model: model, error: String(msg).slice(0, 400), at: Date.now() }));
+  }
 
   function askConsent() {
     return new Promise(function (resolve, reject) {
@@ -186,9 +193,14 @@
     if (onStatus) onStatus('Loading ' + label(id) + (wantGpu ? ' on the GPU' : '') + '\u2026 the first time can take up to a minute.');
     return cap.load({ id: id, backend: wantGpu ? 'gpu' : 'cpu' }).then(function (r) {
       loaded = { id: id, backend: r.backend };
-      if (wantGpu && r.backend !== 'gpu' && A()) A().toast('The GPU could not be used on this phone, so the CPU is being used instead.');
-      changed();
-    });
+      if (wantGpu && r.backend !== 'gpu') {
+        rememberGpuError(id, r.gpuError || 'The GPU did not start.');
+        if (A()) A().toast('The GPU could not be used, so the CPU is being used instead. Open Settings, Diagnostics to see why.');
+      } else if (wantGpu) {
+        rememberGpuError(id, null);
+      }
+      return cap.status().then(function (st) { status = st; }, function () {});
+    }).then(changed);
   }
 
   function generate(o) {
@@ -284,6 +296,7 @@
       else { writeConsent({ gpu: false, storage: true }); loaded = { id: null, backend: null }; changed(); }
     });
     dev.appendChild(gpuRow);
+    if (status && status.gpuBlocked) dev.appendChild(el('div', 'lm-warn', 'The GPU is switched off because it crashed the app earlier, so the CPU is used. Open Settings, Diagnostics to try it again.'));
     if (status && !status.gpuLikely) dev.appendChild(el('div', 'lm-meta', 'No GPU compute driver was found, so models may fall back to the CPU automatically.'));
     root.appendChild(dev);
 
@@ -403,7 +416,23 @@
   window.ToplixLocal = {
     available: available, init: init, refresh: refresh, mount: mount,
     installed: installedList, isInstalled: isInstalled, hasModel: hasModel, label: label,
-    hasConsent: hasConsent, gpuEnabled: gpuEnabled, ensureConsent: ensureConsent,
+    hasConsent: hasConsent, gpuEnabled: gpuEnabled, gpuAllowed: gpuAllowed, ensureConsent: ensureConsent,
+    lastGpuError: lastGpuError, rememberGpuError: rememberGpuError, native: function () { return cap; },
+    loadedInfo: function () { return { id: loaded.id, backend: loaded.backend }; },
+    deviceStatus: function () { return status; }, askConsent: askConsent, setGpu: function (on) {
+      var c = readConsent() || { v: CONSENT_VERSION, storage: true };
+      writeConsent({ gpu: !!on, storage: true }); changed();
+    },
+    probeGpu: function (id) {
+      // Starts the model on the GPU once, on purpose, to see whether it works. Guarded natively.
+      if (!cap) return Promise.reject(new Error('Not available'));
+      loaded = { id: null, backend: null };
+      return cap.unload().catch(function () {}).then(function () { return cap.load({ id: id, backend: 'gpu' }); }).then(function (r) {
+        loaded = { id: id, backend: r.backend };
+        rememberGpuError(id, r.backend === 'gpu' ? null : (r.gpuError || 'The GPU did not start.'));
+        return cap.status().then(function (st) { status = st; }, function () {}).then(function () { return r; });
+      });
+    },
     generate: generate, onChange: onChange
   };
 })();

@@ -55,6 +55,10 @@
     card.appendChild(el('h1', 'gate-title', title));
     if (sub) card.appendChild(el('p', 'gate-sub', sub));
     gate.appendChild(card);
+    var help = el('button', 'gate-trouble', 'Something not working? Check this device');
+    help.type = 'button';
+    help.addEventListener('click', function () { if (window.ToplixDoctor) window.ToplixDoctor.open(); });
+    gate.appendChild(help);
     return card;
   }
 
@@ -80,7 +84,7 @@
   /* ---------- Step 1: permissions ---------- */
   function showPermissions() {
     lock(true);
-    var onAndroid = N().shell === 'android';
+    var onAndroid = N().shell === 'android' || N().shell === 'ios';
     var card = shell('Before you start', 'Toplix Pro needs your permission for the following. You can change this later in Settings.');
 
     var net = toggle(true, true);

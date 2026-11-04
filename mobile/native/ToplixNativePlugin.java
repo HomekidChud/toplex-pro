@@ -219,6 +219,7 @@ public class ToplixNativePlugin extends Plugin {
                         JSObject r = new JSObject();
                         r.put("status", resp.code());
                         r.put("text", resp.body() != null ? resp.body().string() : "");
+                        String dh = resp.header("Date"); if (dh != null) r.put("date", dh);
                         call.resolve(r);
                         return;
                     } catch (java.net.UnknownHostException | java.net.ConnectException e) {

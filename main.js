@@ -147,7 +147,7 @@ ipcMain.handle('native:http', async (event, opts) => {
   const u = new URL(opts.url);
   if (u.protocol !== 'https:' || !HTTP_ALLOWED_HOSTS.has(u.hostname)) throw new Error('Host not allowed');
   const res = await fetch(opts.url, { method: opts.method || 'GET', headers: opts.headers || {}, body: opts.body });
-  return { status: res.status, text: await res.text() };
+  return { status: res.status, text: await res.text(), date: res.headers.get('date') || undefined };
 });
 
 // 3) Encrypted credential storage (OS keychain via safeStorage)

@@ -277,3 +277,32 @@ html.gate-open .sidebar-float { display: none !important; }
 .lm-dialog-row-title { font-weight: 700; font-size: var(--text-sm); }
 .lm-dialog-row-sub { font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.5; }
 .lm-dialog-actions { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); }
+
+/* ---------- Diagnostics ---------- */
+.gate-trouble { display: block; margin: var(--space-3) auto var(--space-5); background: none; border: 0; padding: var(--space-2) var(--space-3); color: var(--color-text-muted); font: inherit; font-size: var(--text-sm); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: 44px; }
+.gate-trouble:hover { color: var(--color-text); }
+.dr-dialog { max-width: 560px; max-height: min(100%, 46rem); }
+.dr-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.dr-list { display: flex; flex-direction: column; gap: var(--space-2); overflow-y: auto; min-height: 4rem; }
+.dr-item { padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface-offset); border: 1px solid transparent; display: flex; flex-direction: column; gap: var(--space-2); }
+.dr-item-top { display: flex; align-items: flex-start; gap: var(--space-2); }
+.dr-title { font-weight: 700; font-size: var(--text-sm); overflow-wrap: anywhere; }
+.dr-detail { font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; }
+.dr-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: #8a8f98; }
+.dr-ok .dr-dot { background: #2f9e5b; }
+.dr-info .dr-dot { background: #3b82c4; }
+.dr-warn .dr-dot { background: #d9961a; }
+.dr-error .dr-dot { background: #d64545; }
+.dr-error { border-color: rgba(214, 69, 69, 0.45); }
+.dr-warn { border-color: rgba(217, 150, 26, 0.4); }
+.dr-foot { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
+.dr-foot .btn, .dr-item .btn, .dr-close { min-height: 44px; }
+.dr-fix-row { cursor: pointer; }
+.dr-fix-top { display: flex; align-items: flex-start; gap: var(--space-2); }
+.dr-fix-top input { margin-top: 3px; width: 18px; height: 18px; flex: none; }
+.dr-banner { position: fixed; left: var(--space-3); right: var(--space-3); bottom: max(var(--space-3), env(safe-area-inset-bottom)); z-index: 9000; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); border: 1px solid rgba(214, 69, 69, 0.5); box-shadow: 0 10px 30px rgba(0,0,0,0.2); max-width: 36rem; margin-inline: auto; }
+.dr-banner-text { flex: 1 1 14rem; font-size: var(--text-sm); }
+.dr-banner .btn { min-height: 44px; }
+.lm-warn { font-size: var(--text-xs); color: #b35a00; line-height: 1.5; }
+.dr-dialog .lm-dialog-actions { position: sticky; bottom: calc(-1 * var(--space-5)); background: var(--color-surface); padding-block: var(--space-3); margin-bottom: calc(-1 * var(--space-5)); }
+.lm-overlay { align-items: safe center; }

@@ -27,3 +27,20 @@ s = s[:j] + queries.lstrip('\n') + '    ' + s[j:]
 if 'usesCleartextTraffic' not in s:
     s = s.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
 open(p, 'w').write(s)
+
+# The GPU engine opens the phone's OpenCL driver. Apps targeting Android 12+ must declare the
+# vendor libraries they use, or the GPU start fails (or aborts the app). Not required, so phones
+# without them still install.
+s = open(p).read()
+if 'libOpenCL.so' not in s:
+    libs = """
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-car.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+    """
+    k = s.rindex('</application>')
+    s = s[:k] + libs + s[k:]
+if 'largeHeap' not in s:
+    s = s.replace('<application', '<application android:largeHeap="true"', 1)
+open(p, 'w').write(s)

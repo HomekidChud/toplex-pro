@@ -6,5 +6,9 @@
   "android": {
     "adjustMarginsForEdgeToEdge": "force",
     "allowMixedContent": true
+  },
+  "ios": {
+    "contentInset": "never",
+    "limitsNavigationsToAppBoundDomains": false
   }
 }

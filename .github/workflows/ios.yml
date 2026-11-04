@@ -1,0 +1,66 @@
+name: iOS build
+
+# Builds an unsigned iOS app (.ipa). Apple only lets signed apps run, so the file is installed
+# with a sideloading tool (AltStore, Sideloadly, ...) that signs it with your own Apple ID.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+
+      - name: Install Capacitor
+        working-directory: mobile
+        run: npm install
+
+      - name: Copy web app into the iOS shell
+        run: |
+          rm -rf mobile/www && mkdir -p mobile/www
+          cp -r renderer/. mobile/www/
+
+      - name: Create iOS project
+        working-directory: mobile
+        run: |
+          npx cap add ios
+          npx capacitor-assets generate --ios --assetBaseDir assets || echo "icon generation skipped"
+          ls ios/App
+
+      - name: Configure iOS project
+        run: .github/ios-configure.sh
+
+      - name: Sync web assets
+        working-directory: mobile
+        run: npx cap sync ios
+
+      - name: Build unsigned app
+        working-directory: mobile/ios/App
+        run: |
+          set -o pipefail
+          VERSION=$(node -p "require('../../../package.json').version")
+          CODE=$(node -e "const [a,b,c]=require('../../../package.json').version.split('.').map(Number);console.log(a*10000+b*100+c)")
+          if [ -d App.xcworkspace ]; then CONTAINER="-workspace App.xcworkspace"; else CONTAINER="-project App.xcodeproj"; fi
+          xcodebuild $CONTAINER -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath "$PWD/build/App.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$CODE" \
+            archive | tail -n 60
+
+      - name: Package .ipa
+        run: |
+          set -e
+          VERSION=$(node -p "require('./package.json').version")
+          APPDIR=$(ls -d mobile/ios/App/build/App.xcarchive/Products/Applications/*.app | head -1)
+          rm -rf Payload out && mkdir -p Payload out
+          cp -R "$APPDIR" Payload/
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APPDIR/Info.plist"
+          zip -qry "out/Toplix-Pro-${VERSION}-ios.ipa" Payload
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with: { name: ios, path: out/*.ipa, if-no-files-found: error }

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta name="toplix-version" content="1.6.0">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#f7f7f8" />
@@ -165,6 +166,10 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="17" cy="15" r="2.5"/><path d="M12 2a10 10 0 1 0 10 10"/></svg>
           Appearance
         </button>
+        <button class="settings-tab" data-tab="doctor" role="tab" aria-selected="false" data-testid="tab-doctor">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          Diagnostics
+        </button>
         <button class="settings-tab" data-tab="about" role="tab" aria-selected="false" data-testid="tab-about">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
           About
@@ -278,11 +283,19 @@
           </div>
         </section>
 
+        <!-- Diagnostics -->
+        <section class="settings-pane" data-pane="doctor">
+          <p class="settings-intro">Checks this device and the app for anything that would stop Toplix Pro working: internet, the date and time, storage, sign-in, settings, on-device models and the GPU. It explains what it finds and only fixes things after you allow it.</p>
+          <div class="about-block">
+            <button class="btn primary" id="open-doctor" type="button" data-testid="button-open-doctor">Scan this device</button>
+          </div>
+        </section>
+
         <!-- About -->
         <section class="settings-pane" data-pane="about">
           <div class="about-block">
             <div class="brand about-brand"><span class="brand-mark" aria-hidden="true">T</span><span class="brand-name">Toplix <em>Pro</em></span></div>
-            <p>Version 1.5.0 · macOS, Windows, Linux, Android</p>
+            <p>Version 1.6.0 · macOS, Windows, Linux, Android, iOS</p>
             <p>A focused AI coding assistant built with Electron, in the spirit of T3 Code. Your chats and API keys never leave your machine.</p>
             <p class="about-license">© 2026 HomekidChud. All rights reserved. See LICENSE for terms.</p>
           </div>
@@ -310,6 +323,7 @@
   <script src="native-bridge.js"></script>
   <script src="siwc.js"></script>
   <script src="local-models.js"></script>
+  <script src="doctor.js"></script>
   <script src="mobile-bridge.js"></script>
   <script src="onboarding.js"></script>
   <script src="app.js"></script>

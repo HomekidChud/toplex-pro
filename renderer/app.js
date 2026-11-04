@@ -572,6 +572,7 @@
     setGenerating(false);
     state.abort = null;
     if (error) {
+      if (window.ToplixDoctor) window.ToplixDoctor.noteError('Request failed: ' + (error.message || error), 'chat');
       msg.error = true;
       msg.content = 'Request failed: ' + (error.message || error) +
         '. Check your API key, model name and connection in Settings.';
@@ -1411,6 +1412,9 @@
         $('#settings-crumb').textContent = tab.textContent;
       });
     });
+
+    var odoc = $('#open-doctor');
+    if (odoc) odoc.addEventListener('click', function () { if (window.ToplixDoctor) window.ToplixDoctor.open(); });
 
     $('#setting-temp').addEventListener('input', function (e) {
       $('#temp-value').textContent = e.target.value;

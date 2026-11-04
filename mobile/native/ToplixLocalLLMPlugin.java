@@ -5,7 +5,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.BatteryManager;
 import android.os.Build;
+import android.os.PowerManager;
 import android.provider.OpenableColumns;
 
 import androidx.activity.result.ActivityResult;
@@ -77,6 +79,81 @@ public class ToplixLocalLLMPlugin extends Plugin {
         notifyListeners(EVENT, o);
     }
 
+
+    /* ---------------- GPU crash guard ----------------
+     * A GPU failure inside the native engine can abort the whole process, which no try/catch can
+     * survive. So a marker file is written before every GPU start and removed right after it
+     * returns. If the marker is still there on the next launch, the GPU start crashed the app:
+     * the GPU is then blocked (the CPU is used) until the user chooses to try it again. */
+
+    private File guardFile(String name) { return new File(getContext().getFilesDir(), name); }
+
+    private static String readText(File f) {
+        try (InputStream in = new java.io.FileInputStream(f)) {
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[2048];
+            int n;
+            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void writeText(File f, String text) {
+        try (FileOutputStream out = new FileOutputStream(f)) {
+            out.write(text.getBytes(StandardCharsets.UTF_8));
+            out.getFD().sync();
+        } catch (Exception ignored) { }
+    }
+
+    @Override
+    public void load() {
+        File pending = guardFile("gpu_probe.pending");
+        if (pending.exists()) {
+            JSONObject o = new JSONObject();
+            try {
+                o.put("model", String.valueOf(readText(pending)).trim());
+                o.put("at", System.currentTimeMillis());
+            } catch (Exception ignored) { }
+            writeText(guardFile("gpu_blocked.json"), o.toString());
+            pending.delete();
+        }
+    }
+
+    private JSONObject gpuBlock() {
+        File f = guardFile("gpu_blocked.json");
+        if (!f.exists()) return null;
+        try { return new JSONObject(String.valueOf(readText(f))); } catch (Exception e) { return null; }
+    }
+
+    private void recordGpuResult(String id, boolean ok, String error) {
+        try {
+            File f = guardFile("gpu_results.json");
+            JSONObject all = f.exists() ? new JSONObject(String.valueOf(readText(f))) : new JSONObject();
+            JSONObject r = new JSONObject();
+            r.put("ok", ok);
+            r.put("at", System.currentTimeMillis());
+            if (error != null) r.put("error", error);
+            all.put(id, r);
+            writeText(f, all.toString());
+        } catch (Exception ignored) { }
+    }
+
+    private JSONObject gpuResults() {
+        File f = guardFile("gpu_results.json");
+        if (!f.exists()) return new JSONObject();
+        try { return new JSONObject(String.valueOf(readText(f))); } catch (Exception e) { return new JSONObject(); }
+    }
+
+    @PluginMethod
+    public void clearGpuBlock(PluginCall call) {
+        guardFile("gpu_blocked.json").delete();
+        guardFile("gpu_results.json").delete();
+        guardFile("gpu_probe.pending").delete();
+        call.resolve();
+    }
+
     private static String safeId(String s) {
         String id = s == null ? "" : s.toLowerCase().replaceAll("[^a-z0-9._-]+", "-");
         if (id.length() > 60) id = id.substring(0, 60);
@@ -137,7 +214,94 @@ public class ToplixLocalLLMPlugin extends Plugin {
         r.put("device", Build.MANUFACTURER + " " + Build.MODEL);
         r.put("loaded", loadedId);
         r.put("backend", loadedBackend);
+        JSONObject blk = gpuBlock();
+        r.put("gpuBlocked", blk != null);
+        if (blk != null) r.put("gpuBlockedModel", blk.optString("model"));
         call.resolve(r);
+    }
+
+    /* ---------------- diagnostics (read-only) ---------------- */
+
+    @PluginMethod
+    public void diagnose(PluginCall call) {
+        io.execute(() -> {
+            JSObject r = new JSObject();
+            try {
+                Context c = getContext();
+                r.put("os", "Android " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")");
+                r.put("device", Build.MANUFACTURER + " " + Build.MODEL);
+                r.put("soc", Build.VERSION.SDK_INT >= 31 ? Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL : Build.HARDWARE);
+                r.put("abis", android.text.TextUtils.join(",", Build.SUPPORTED_ABIS));
+                ActivityManager am = (ActivityManager) c.getSystemService(Context.ACTIVITY_SERVICE);
+                ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+                am.getMemoryInfo(mi);
+                r.put("ramMb", mi.totalMem / (1024 * 1024));
+                r.put("availRamMb", mi.availMem / (1024 * 1024));
+                r.put("lowMemory", mi.lowMemory);
+                r.put("freeStorageMb", c.getFilesDir().getUsableSpace() / (1024 * 1024));
+                PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+                r.put("powerSave", pm != null && pm.isPowerSaveMode());
+                if (Build.VERSION.SDK_INT >= 29 && pm != null) r.put("thermal", pm.getCurrentThermalStatus());
+                try {
+                    android.content.pm.PackageInfo wv = android.webkit.WebView.getCurrentWebViewPackage();
+                    if (wv != null) r.put("webview", wv.packageName + " " + wv.versionName);
+                } catch (Throwable ignored) { }
+                String[] cl = {"/vendor/lib64/libOpenCL.so", "/system/vendor/lib64/libOpenCL.so", "/system/lib64/libOpenCL.so",
+                    "/vendor/lib64/libOpenCL-pixel.so", "/vendor/lib64/libOpenCL-car.so", "/vendor/lib64/egl/libGLES_mali.so"};
+                JSArray found = new JSArray();
+                for (String p : cl) if (new File(p).exists()) found.put(p);
+                r.put("openclLibs", found);
+                JSONObject blk = gpuBlock();
+                if (blk != null) {
+                    r.put("gpuBlocked", true);
+                    r.put("gpuBlockedModel", blk.optString("model"));
+                    r.put("gpuBlockedAt", blk.optLong("at"));
+                } else {
+                    r.put("gpuBlocked", false);
+                }
+                r.put("gpuResults", new JSObject(gpuResults().toString()));
+
+                // model files: present, size matches what was recorded when it was saved
+                JSArray list = new JSArray();
+                File[] files = modelsDir().listFiles();
+                if (files != null) for (File f : files) {
+                    if (!f.getName().endsWith(".json")) continue;
+                    JSONObject m = readMeta(f);
+                    JSObject o = new JSObject();
+                    String id = f.getName().substring(0, f.getName().length() - 5);
+                    o.put("id", id);
+                    if (m == null) { o.put("problem", "Its details file is unreadable."); list.put(o); continue; }
+                    File mf = new File(modelsDir(), m.optString("file"));
+                    long expected = m.optLong("size", -1);
+                    o.put("name", m.optString("name"));
+                    if (!mf.exists()) o.put("problem", "The model file is missing.");
+                    else if (mf.length() < 1024 * 1024) o.put("problem", "The model file is empty or cut short.");
+                    else if (expected > 0 && mf.length() != expected) o.put("problem", "The model file size changed after it was saved.");
+                    else {
+                        try (InputStream in = new java.io.FileInputStream(mf)) {
+                            if (in.read() < 0) o.put("problem", "The model file cannot be read.");
+                        }
+                    }
+                    list.put(o);
+                }
+                // leftover partial downloads
+                File[] parts = modelsDir().listFiles((d, n) -> n.endsWith(".part"));
+                long partBytes = 0;
+                if (parts != null) for (File f : parts) partBytes += f.length();
+                r.put("partialBytes", partBytes);
+                r.put("modelChecks", list);
+                call.resolve(r);
+            } catch (Throwable t) {
+                call.reject("Diagnostics failed: " + t.getMessage());
+            }
+        });
+    }
+
+    @PluginMethod
+    public void clearPartials(PluginCall call) {
+        File[] parts = modelsDir().listFiles((d, n) -> n.endsWith(".part"));
+        if (parts != null) for (File f : parts) f.delete();
+        call.resolve();
     }
 
     /* ---------------- model files ---------------- */
@@ -400,12 +564,21 @@ public class ToplixLocalLLMPlugin extends Plugin {
                     String used = wantGpu ? "gpu" : "cpu";
                     String gpuError = null;
                     LlmInference e = null;
-                    if (wantGpu) {
+                    if (wantGpu && gpuBlock() != null) {
+                        gpuError = "The GPU crashed the app on an earlier try, so it is switched off. Run the diagnostics to try it again.";
+                        used = "cpu";
+                    } else if (wantGpu) {
+                        File pending = guardFile("gpu_probe.pending");
+                        writeText(pending, id);
                         try {
                             e = create(model, maxTokens, LlmInference.Backend.GPU);
+                            recordGpuResult(id, true, null);
                         } catch (Throwable t) {
                             gpuError = String.valueOf(t.getMessage());
                             used = "cpu";
+                            recordGpuResult(id, false, gpuError);
+                        } finally {
+                            pending.delete();
                         }
                     }
                     if (e == null) e = create(model, maxTokens, LlmInference.Backend.CPU);

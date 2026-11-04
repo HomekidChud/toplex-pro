@@ -28,7 +28,7 @@
     };
   } else if (cap) {
     api = {
-      available: true, shell: 'android',
+      available: true, shell: (window.Capacitor.getPlatform ? window.Capacitor.getPlatform() : 'android'),
       loopbackStart: function (port) { return cap.loopbackStart({ port: port || 1455 }); },
       loopbackWait: function () { return cap.loopbackWait().then(function (r) { return r.url; }); },
       loopbackStop: function () { return cap.loopbackStop(); },
