@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta name="toplix-version" content="1.7.1">
+  <meta name="toplix-version" content="1.8.0">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#f7f7f8" />
@@ -130,6 +130,10 @@
               </button>
               <div class="model-menu" id="model-menu" role="listbox" aria-label="Choose model"></div>
             </div>
+            <button class="local-chip" id="local-hub-btn" title="Run local models — Ollama, LM Studio and other servers on your own machine" aria-label="Run local models">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/></svg>
+              Local
+            </button>
             <span class="composer-hint">Enter to send · Shift+Enter for a new line</span>
             <div class="composer-actions">
               <button class="icon-btn stop-btn" id="stop-btn" hidden aria-label="Stop generating" data-testid="button-stop" title="Stop (Esc)">
@@ -340,7 +344,7 @@
         <section class="settings-pane" data-pane="about">
           <div class="about-block">
             <div class="brand about-brand"><span class="brand-mark" aria-hidden="true">T</span><span class="brand-name">Toplix <em>Pro</em></span></div>
-            <p>Version 1.7.1 · macOS, Windows, Linux, Android, iOS</p>
+            <p>Version 1.8.0 · macOS, Windows, Linux, Android, iOS</p>
             <p>A focused AI coding assistant built with Electron, in the spirit of T3 Code. Your chats and API keys never leave your machine.</p>
             <p class="about-license">© 2026 HomekidChud. All rights reserved. See LICENSE for terms.</p>
           </div>
@@ -368,6 +372,7 @@
   <script src="native-bridge.js"></script>
   <script src="siwc.js"></script>
   <script src="local-models.js"></script>
+  <script src="local-hub.js"></script>
   <script src="doctor.js"></script>
   <script src="mobile-bridge.js"></script>
   <script src="computer-use.js"></script>

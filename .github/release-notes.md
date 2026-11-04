@@ -1,6 +1,9 @@
 Toplix Pro __VERSION__ is now available on macOS, Windows, Linux, Android and iOS.
 
 ## What's new
+- Custom models: the model picker now has an "Other - type a model name" option, so any OpenAI-compatible endpoint can use any model, not just the built-in suggestions or what the server lists.
+- Run local models: a new Local button next to the model picker opens a dedicated screen that scans your machine for Ollama, LM Studio and Jan, lists their models and connects one with a single click. You can also add a server by address (handy on a phone - use your computer's Wi-Fi address). A "Browse local models" button was added to the Custom provider card in Settings.
+
 - Desktop app detection: on the sign-in screen Toplix Pro now checks whether ChatGPT (with Cowork) and Claude 2.0 are installed on your computer. If ChatGPT is there, it starts connecting straight away - you just finish the one approval in your browser. If Claude 2.0 is there, the Claude option comes preselected with its API key panel. Neither installed? The normal sign-in appears. Settings, Connectors shows what was found, with Open app buttons. Nothing is ever read from those apps - only their presence is checked.
 
 - Two modes on desktop: a Chat / Computer toggle in the composer. Chat is the normal assistant. Computer (computer use) lets the AI read, write and run commands on your computer — but only inside folders you approve, never near credentials (SSH keys, keychains, .env, tokens are always blocked), and every file write or command is shown in an approval dialog before it runs. Commands can't run elevated, destructive ones are blocked, they are killed after 60 seconds, and everything is written to a local audit log. Manage approved folders in Settings, Behavior, Computer use.

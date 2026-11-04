@@ -457,6 +457,47 @@
         });
         menu.appendChild(item);
       });
+
+      // Custom endpoints: also let the user type any model name, not just the
+      // hardcoded suggestions or whatever the server currently lists.
+      if (pid === 'custom') {
+        var other = el('button', 'model-menu-item model-menu-other');
+        other.type = 'button';
+        other.appendChild(el('span', 'model-name', 'Other — type a model name…'));
+        other.addEventListener('click', function () {
+          menu.innerHTML = '';
+          var wrap = el('div', 'model-menu-group', p.name);
+          var form = el('div', 'model-menu-custom');
+          var input = el('input');
+          input.type = 'text';
+          input.placeholder = 'e.g. llama3.3:70b, qwen3-coder, phi4…';
+          input.value = cfg.model && p.models.indexOf(cfg.model) < 0 ? cfg.model : '';
+          var go = el('button', 'btn primary', 'Use');
+          go.type = 'button';
+          var cancel = el('button', 'btn ghost', 'Cancel');
+          cancel.type = 'button';
+          form.appendChild(input); form.appendChild(go); form.appendChild(cancel);
+          wrap.appendChild(form);
+          menu.appendChild(wrap);
+          setTimeout(function () { input.focus(); }, 30);
+          function submit() {
+            var v = input.value.trim();
+            if (!v) return;
+            state.settings.activeProvider = 'custom';
+            state.settings.providers.custom.model = v;
+            if (p.models.indexOf(v) < 0) p.models.unshift(v);
+            persist(); renderModelMenu(); updateModelUI();
+            $('#model-menu').classList.remove('open');
+          }
+          go.addEventListener('click', submit);
+          cancel.addEventListener('click', function () { renderModelMenu(); });
+          input.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+            if (e.key === 'Escape') { e.stopPropagation(); renderModelMenu(); }
+          });
+        });
+        menu.appendChild(other);
+      }
     });
   }
 
@@ -1382,6 +1423,15 @@
       fields.appendChild(keyWrap); fields.appendChild(modelField); fields.appendChild(urlField);
       card.appendChild(fields);
 
+      if (pid === 'custom') {
+        var browse = el('button', 'btn ghost');
+        browse.type = 'button';
+        browse.textContent = 'Browse local models';
+        browse.style.marginTop = 'var(--space-2)';
+        browse.addEventListener('click', function () { if (window.ToplixLocalHub) window.ToplixLocalHub.open(); });
+        card.appendChild(browse);
+      }
+
       var activate = el('button', 'btn ghost');
       activate.textContent = pid === state.settings.activeProvider ? '✓ Active provider' : 'Use this provider';
       activate.style.marginTop = 'var(--space-3)';
@@ -1478,6 +1528,9 @@
     $('#sidebar-expand').addEventListener('click', function () { $('#app').classList.remove('sidebar-hidden'); });
     $('#theme-toggle').addEventListener('click', toggleTheme);
     $('#open-settings').addEventListener('click', openSettings);
+    $('#local-hub-btn').addEventListener('click', function () {
+      if (window.ToplixLocalHub) window.ToplixLocalHub.open();
+    });
     $('#open-settings-top').addEventListener('click', openSettings);
     $('#demo-open-settings').addEventListener('click', openSettings);
     $('#demo-close').addEventListener('click', function () { $('#demo-banner').hidden = true; });
