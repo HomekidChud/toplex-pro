@@ -7,6 +7,7 @@
   'use strict';
 
   var rpcId = 0;
+  var VERSION = ((typeof document !== 'undefined' && document.querySelector('meta[name="toplix-version"]')) || {}).content || '';
 
   function safeParse(text) {
     try { return JSON.parse(text); } catch (e) { return null; }
@@ -63,7 +64,7 @@
       var init = await rpc(server, 'initialize', {
         protocolVersion: '2025-03-26',
         capabilities: {},
-        clientInfo: { name: 'Toplix Pro', version: '1.2.0' }
+        clientInfo: { name: 'Toplix Pro', version: VERSION || '1.0.0' }
       });
       // optional notification — some servers require it before tools
       try {

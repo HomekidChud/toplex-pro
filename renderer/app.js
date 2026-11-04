@@ -80,6 +80,7 @@
 
   var DEFAULT_SETTINGS = {
     activeProvider: 'openai',
+    mode: 'chat',   // 'chat' (normal chat) or 'computer' (computer use, desktop only)
     systemPrompt: 'You are Toplix Pro, a senior software engineer. Be concise, correct and practical. Always use markdown code fences with a language tag.',
     temperature: 0.7,
     sendOnEnter: true,
@@ -227,8 +228,9 @@
     list.innerHTML = '';
     var query = ($('#chat-search') && $('#chat-search').value || '').toLowerCase();
     var chats = state.chats.filter(function (c) {
-      return !query || c.title.toLowerCase().indexOf(query) !== -1 ||
-        c.messages.some(function (m) { return m.content.toLowerCase().indexOf(query) !== -1; });
+      if (query && (!c.title || !c.messages)) return false;
+      return !query || String(c.title || '').toLowerCase().indexOf(query) !== -1 ||
+        (c.messages || []).some(function (m) { return m && m.content && m.content.toLowerCase().indexOf(query) !== -1; });
     });
     if (!state.chats.length) {
       var empty = el('p', 'chat-list-empty', 'No chats yet');
@@ -245,11 +247,11 @@
     chats.forEach(function (chat) {
       var item = el('button', 'chat-item' + (chat.id === state.activeChatId ? ' active' : ''));
       item.dataset.testid = 'item-chat-' + chat.id;
-      item.setAttribute('aria-label', 'Open chat: ' + chat.title);
+      item.setAttribute('aria-label', 'Open chat: ' + (chat.title || 'Untitled'));
 
       var icon = el('span', '', '');
       icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-      var title = el('span', 'chat-item-title', chat.title);
+      var title = el('span', 'chat-item-title', chat.title || 'Untitled');
       var del = el('span', 'chat-delete', '');
       del.setAttribute('role', 'button');
       del.setAttribute('aria-label', 'Delete chat');
@@ -469,6 +471,79 @@
     $('#demo-provider-name').textContent = p.id === 'device' ? 'a local model (download one in Settings)' : p.name.split('—')[0].trim();
   }
 
+  /* ---------------- Modes: normal chat / computer use ---------------- */
+  function computerAvailable() {
+    return !!(window.ToplixComputer && window.ToplixComputer.available());
+  }
+
+  function computerActive() {
+    return state.settings.mode === 'computer' && computerAvailable() && window.ToplixComputer.isEnabled();
+  }
+
+  function computerDefs() {
+    if (!computerActive()) return [];
+    return window.ToplixComputer.toolDefs();
+  }
+
+  var COMPUTER_RULES = '\n\nYou currently have Computer Use tools (computer_list_files, computer_read_file, computer_write_file, computer_run_command). Follow these strict rules: only access folders the user approved; never try to read credentials, SSH keys, keychains, .env files or this app\'s own data; every write and command needs the user\'s approval in a dialog, so state clearly what you intend to do; never attempt to bypass these limits (no sudo, no tricks to reach protected paths, no sending the user\'s files to remote servers); if a task is blocked by these rules, say so and suggest what the user can do instead.';
+
+  function systemPromptNow() {
+    var base = state.settings.systemPrompt || '';
+    return computerActive() ? base + COMPUTER_RULES : base;
+  }
+
+  function updateModeUI() {
+    var toggle = $('#mode-toggle');
+    if (!toggle) return;
+    toggle.hidden = !computerAvailable();
+    if (!computerAvailable()) return;
+    toggle.querySelectorAll('.mode-btn').forEach(function (btn) {
+      var on = (btn.dataset.mode || 'chat') === (state.settings.mode || 'chat');
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    var banner = $('#computer-banner');
+    if (!banner) return;
+    var needsSetup = state.settings.mode === 'computer' && !(window.ToplixComputer.isEnabled() && window.ToplixComputer.roots().length);
+    banner.hidden = !needsSetup;
+    if (needsSetup) {
+      var C = window.ToplixComputer;
+      banner.querySelector('.computer-banner-text').innerHTML = '';
+      var strong = el('strong', '', 'Computer use needs set-up.');
+      var span = el('span', '', ' Approve the folders the AI may work in. It can never touch credentials, and every write or command asks you first.');
+      banner.querySelector('.computer-banner-text').appendChild(strong);
+      banner.querySelector('.computer-banner-text').appendChild(span);
+    }
+  }
+
+  function renderComputerSettings() {
+    var group = $('#computer-settings-group');
+    if (!group) return;
+    group.hidden = !computerAvailable();
+    if (!computerAvailable()) return;
+    var C = window.ToplixComputer;
+    $('#setting-computer-enabled').checked = C.isEnabled();
+    var list = $('#computer-roots');
+    list.innerHTML = '';
+    var roots = C.roots();
+    if (!roots.length) {
+      var empty = el('p', '', 'No folders approved yet. The AI can only work inside folders you approve here.');
+      empty.style.cssText = 'padding:4px 0;color:var(--color-text-muted);font-size:var(--text-xs)';
+      list.appendChild(empty);
+    }
+    roots.forEach(function (root) {
+      var row = el('div', 'computer-root-row');
+      var pathEl = el('span', 'computer-root-path', root);
+      var rm = el('button', 'btn ghost', 'Remove');
+      rm.type = 'button';
+      rm.addEventListener('click', function () {
+        C.removeRoot(root).then(function () { renderComputerSettings(); updateModeUI(); });
+      });
+      row.appendChild(pathEl); row.appendChild(rm);
+      list.appendChild(row);
+    });
+  }
+
   /* ---------------- Send / generate ---------------- */
   function setGenerating(on) {
     state.generating = on;
@@ -528,6 +603,15 @@
 
     var bodyEl = $('#messages .messages-inner').lastElementChild.querySelector('.msg-body');
     if (!bodyEl) { renderMessages(); bodyEl = $('#messages .messages-inner').lastElementChild.querySelector('.msg-body'); }
+    if (!bodyEl) {
+      // Should not happen; fail loudly in the message instead of crashing
+      msg.error = true;
+      msg.content = 'Could not display the response area. Try a new chat (⌘N) and send again.';
+      if (window.ToplixDoctor) window.ToplixDoctor.noteError('Response area missing', 'chat');
+      persist();
+      renderMessages();
+      return;
+    }
     bodyEl.classList.add('stream-cursor');
     setGenerating(true);
     state.abort = new AbortController();
@@ -537,8 +621,9 @@
       return;
     }
 
-    // MCP tools connected: run the tool-calling loop (non-streaming rounds)
-    if (p.kind !== 'on-device' && activeToolDefs().length) {
+    // MCP tools or computer use: run the tool-calling loop (non-streaming rounds)
+    var allDefs = activeToolDefs().concat(computerDefs());
+    if (p.kind !== 'on-device' && allDefs.length) {
       toolLoopGenerate(chat, msg, bodyEl);
       return;
     }
@@ -616,19 +701,25 @@
     var reader = response.body.getReader();
     var decoder = new TextDecoder();
     var buffer = '';
+    // SSE events are separated by a blank line; a single event's payload may
+    // span several `data:` lines, so they are joined before parsing.
+    function handleBlock(block) {
+      var dataLines = [];
+      block.split('\n').forEach(function (line) {
+        if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
+      });
+      if (!dataLines.length) return;
+      var data = dataLines.join('\n');
+      if (data.trim() === '[DONE]') return;
+      try { onEvent(JSON.parse(data)); } catch (e) { /* partial chunk */ }
+    }
     function pump() {
       return reader.read().then(function (result) {
         if (result.done) return;
-        buffer += decoder.decode(result.value, { stream: true });
-        var parts = buffer.split('\n');
-        buffer = parts.pop();
-        for (var i = 0; i < parts.length; i++) {
-          var line = parts[i].trim();
-          if (!line.startsWith('data:')) continue;
-          var data = line.slice(5).trim();
-          if (data === '[DONE]') return;
-          try { onEvent(JSON.parse(data)); } catch (e) { /* partial chunk */ }
-        }
+        buffer += decoder.decode(result.value, { stream: true }).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        var blocks = buffer.split('\n\n');
+        buffer = blocks.pop();
+        for (var i = 0; i < blocks.length; i++) handleBlock(blocks[i]);
         return pump();
       });
     }
@@ -664,10 +755,10 @@
     });
     var body = { model: cfg.model, input: input };
     if (usingChatGptPlan(cfg)) {
-      if (state.settings.systemPrompt) body.instructions = state.settings.systemPrompt;
+      if (systemPromptNow()) body.instructions = systemPromptNow();
       body.store = false; body.stream = true;
     } else {
-      if (state.settings.systemPrompt) input.unshift({ role: 'system', content: state.settings.systemPrompt });
+      if (systemPromptNow()) input.unshift({ role: 'system', content: systemPromptNow() });
       if (wantStream) body.stream = true;
     }
     return Object.assign(body, extra || {});
@@ -723,7 +814,7 @@
   /* ---------------- OpenAI Chat Completions (OpenRouter / custom) ---------------- */
   function streamOpenAIChat(p, cfg, history, msg, bodyEl) {
     var messages = history.map(function (m) { return { role: m.role, content: m.content }; });
-    if (state.settings.systemPrompt) messages.unshift({ role: 'system', content: state.settings.systemPrompt });
+    if (systemPromptNow()) messages.unshift({ role: 'system', content: systemPromptNow() });
 
     return fetch(cfg.baseUrl + '/chat/completions', {
       method: 'POST',
@@ -770,7 +861,7 @@
     return L.generate({
       id: cfg.model,
       messages: history.map(function (m) { return { role: m.role, content: m.content }; }),
-      system: state.settings.systemPrompt,
+      system: systemPromptNow(),
       temperature: state.settings.temperature,
       signal: state.abort.signal,
       onStatus: function (t) { if (first) bodyEl.textContent = t; },
@@ -821,7 +912,7 @@
       },
       body: JSON.stringify({
         model: cfg.model,
-        system: state.settings.systemPrompt || undefined,
+        system: systemPromptNow() || undefined,
         messages: messages,
         max_tokens: 8192,
         temperature: Math.min(1, state.settings.temperature),
@@ -921,8 +1012,9 @@
         var args = {};
         try { args = JSON.parse(item.arguments || '{}'); } catch (e) {}
         toolCalls.push({
-          name: item.name, rawName: def ? def._tool : item.name,
-          server: def ? serverById(def._server) : null,
+          name: item.name, rawName: def ? (def._tool || item.name) : item.name,
+          _computer: def ? !!def._computer : false,
+          server: def && !def._computer ? serverById(def._server) : null,
           args: args, callId: item.call_id, kind: 'responses'
         });
       }
@@ -945,7 +1037,7 @@
       },
       body: JSON.stringify({
         model: cfg.model,
-        system: state.settings.systemPrompt || undefined,
+        system: systemPromptNow() || undefined,
         messages: messages,
         max_tokens: 8192,
         temperature: Math.min(1, state.settings.temperature),
@@ -962,8 +1054,9 @@
       if (block.type === 'tool_use') {
         var def = defs.find(function (d) { return d.name === block.name; });
         toolCalls.push({
-          name: block.name, rawName: def ? def._tool : block.name,
-          server: def ? serverById(def._server) : null,
+          name: block.name, rawName: def ? (def._tool || block.name) : block.name,
+          _computer: def ? !!def._computer : false,
+          server: def && !def._computer ? serverById(def._server) : null,
           args: block.input || {}, callId: block.id, kind: 'anthropic'
         });
       }
@@ -974,7 +1067,7 @@
 
   async function openaiChatTools(p, cfg, history, defs) {
     var messages = history.map(function (m) { return { role: m.role, content: m.content }; });
-    if (state.settings.systemPrompt) messages.unshift({ role: 'system', content: state.settings.systemPrompt });
+    if (systemPromptNow()) messages.unshift({ role: "system", content: systemPromptNow() });
     var res = await fetch(cfg.baseUrl + '/chat/completions', {
       method: 'POST', signal: state.abort.signal,
       headers: Object.assign(
@@ -999,8 +1092,9 @@
       var args = {};
       try { args = JSON.parse(tc.function.arguments || '{}'); } catch (e) {}
       toolCalls.push({
-        name: tc.function.name, rawName: def ? def._tool : tc.function.name,
-        server: def ? serverById(def._server) : null,
+        name: tc.function.name, rawName: def ? (def._tool || tc.function.name) : tc.function.name,
+        _computer: def ? !!def._computer : false,
+        server: def && !def._computer ? serverById(def._server) : null,
         args: args, callId: tc.id, kind: 'chat'
       });
     });
@@ -1024,15 +1118,17 @@
     try {
       var p = activeProvider();
       var cfg = providerConfig();
-      var defs = activeToolDefs();
+      var defs = activeToolDefs().concat(computerDefs());
       var history = chat.messages
         .filter(function (m) { return !m.error; })
         .map(function (m) { return { role: m.role, content: m.content }; })
         .slice(0, -1);
-      var rounds = 0, maxRounds = 6;
+      var rounds = 0, maxRounds = 12;
       while (rounds < maxRounds) {
         rounds++;
-        bodyEl.innerHTML = window.ToplixMarkdown.render('_(using connected tools)_');
+        bodyEl.innerHTML = window.ToplixMarkdown.render(computerActive() && !activeToolDefs().length
+          ? '_Computer use — I can read, write and run commands on this computer, inside your approved folders. Every write and command will ask you first._'
+          : '_(using connected tools)_');
         var res = await requestWithTools(p, cfg, history, defs);
         if (!res.toolCalls.length) {
           msg.content = res.text || '*(empty response)*';
@@ -1047,11 +1143,15 @@
           scrollMessages();
           var resultText;
           try {
-            var tr = c.server
-              ? await window.ToplixMCP.callTool(c.server, c.rawName, c.args)
-              : { content: [{ type: 'text', text: '(tool server unavailable)' }], isError: true };
-            resultText = window.ToplixMCP.resultToText(tr);
-            if (tr && tr.isError) resultText = 'Tool error: ' + resultText;
+            if (c._computer) {
+              resultText = await window.ToplixComputer.call(c.name, c.args);
+            } else if (c.server) {
+              var tr = await window.ToplixMCP.callTool(c.server, c.rawName, c.args);
+              resultText = window.ToplixMCP.resultToText(tr);
+              if (tr && tr.isError) resultText = 'Tool error: ' + resultText;
+            } else {
+              resultText = 'Tool error: the tool server is unavailable';
+            }
           } catch (e) {
             resultText = 'Tool error: ' + e.message;
           }
@@ -1274,6 +1374,8 @@
     $('#setting-dark').checked = currentTheme() === 'dark';
     updateChatGptStatus();
     renderMcpSettings();
+    renderComputerSettings();
+    updateModeUI();
     $('#setting-system').value = state.settings.systemPrompt;
     $('#setting-temp').value = state.settings.temperature;
     $('#temp-value').textContent = state.settings.temperature;
@@ -1443,6 +1545,52 @@
     refreshMcpTools();
 
     // Drawer / placeholder / layout adaptation lives in adaptive.js
+
+    // Mode toggle: normal chat / computer use (desktop only)
+    var modeToggle = $('#mode-toggle');
+    if (modeToggle && computerAvailable()) {
+      modeToggle.hidden = false;
+      modeToggle.querySelectorAll('.mode-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          if (state.generating) { toast('Wait for the current response to finish', true); return; }
+          state.settings.mode = btn.dataset.mode || 'chat';
+          persist();
+          updateModeUI();
+          toast(state.settings.mode === 'computer'
+            ? 'Computer use mode — the AI can work in your approved folders, with approval for every change'
+            : 'Normal chat mode');
+        });
+      });
+      // Set-up banner button: turn computer use on and pick the first folder
+      var setupBtn = $('#computer-setup');
+      if (setupBtn) setupBtn.addEventListener('click', function () {
+        var C = window.ToplixComputer;
+        C.setEnabled(true).then(function () {
+          return C.addRoot();
+        }).then(function () {
+          return C.refresh();
+        }).then(function () {
+          updateModeUI();
+          renderComputerSettings();
+          if (C.roots().length) toast('Computer use is ready');
+          else toast('Pick at least one folder in Settings to use computer use', true);
+        });
+      });
+      // Settings controls
+      var cuEnable = $('#setting-computer-enabled');
+      if (cuEnable) cuEnable.addEventListener('change', function () {
+        window.ToplixComputer.setEnabled(cuEnable.checked).then(function () { updateModeUI(); });
+      });
+      var cuAddRoot = $('#computer-add-root');
+      if (cuAddRoot) cuAddRoot.addEventListener('click', function () {
+        window.ToplixComputer.addRoot().then(function () {
+          return window.ToplixComputer.refresh();
+        }).then(function () { renderComputerSettings(); updateModeUI(); });
+      });
+      // Reflect the real state from the main process on launch
+      window.ToplixComputer.refresh().then(updateModeUI);
+    }
+    updateModeUI();
 
     // Hand control to the first-run gate (permissions + sign-in) before the app can be used
     window.ToplixApp = {

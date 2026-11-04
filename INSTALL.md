@@ -116,6 +116,8 @@ npm start
 
 | Problem | Fix |
 | --- | --- |
+| Computer mode says a path is "outside the approved folders" | That is the sandbox working. Approve the folder in Settings → Behavior → Computer use, or ask the AI to work inside a folder you already approved. |
+| The AI's write or command was denied | Every write and command shows an approval dialog first. Denying just returns the refusal to the AI — nothing ran. |
 | "App can't be opened because it's from an unidentified developer" | Right-click the app → Open → Open (see Gatekeeper section above). |
 | "'Toplix Pro' is damaged and can't be opened. You should move it to the Bin." | Download v1.2.0+, or run the `xattr` command in the "damaged app" section above. |
 | ChatGPT sign-in finished but nothing happened | The browser must be the default one on this Mac — the token is passed back via the `toplex://` link. Retry, or paste an OpenAI key on the Models tab. |

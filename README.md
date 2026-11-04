@@ -8,11 +8,27 @@ A fast, focused AI coding assistant for macOS, Windows, Linux, Android and iOS �
 
 - **Multi-provider models** — connect OpenAI (ChatGPT & Codex models), Anthropic (Claude), OpenRouter, or any OpenAI-compatible endpoint (Ollama, LM Studio, Groq…)
 - **MCP tool servers** — connect Model Context Protocol servers (streamable HTTP) and the model can call their tools mid-conversation, with collapsible tool cards in the chat
+- **Two modes on desktop** — switch between **Chat** (normal chat) and **Computer** (computer use): the AI can read, write and run commands on your computer, but only inside folders you approve, never near credentials, and every write or command is shown to you for approval before it runs (more below)
 - **ChatGPT magic-link sign-in** — sign in from chatgpt.com in your browser; Toplix Pro receives the token automatically via its custom URL scheme
 - **Streaming responses** with markdown rendering, syntax-highlighted code blocks and one-click copy
 - **Chat history** with a searchable sidebar, stored locally
 - **Dark & light themes**, keyboard shortcuts (⌘N new chat, ⌘, settings, Esc stop)
 - **Private by design** — API keys and chats live only on your Mac, requests go straight from the app to the provider
+
+## Two modes: Chat and Computer use (desktop)
+
+The toggle next to the model picker switches between:
+
+1. **Chat** — normal chat. The AI answers in the chat window and cannot touch your computer.
+2. **Computer** — computer use. The AI gets four tools (`computer_list_files`, `computer_read_file`, `computer_write_file`, `computer_run_command`) and can do real work on your machine under strict rules enforced by the app itself, not by the model's good behaviour:
+
+- It can only see and change files inside **folders you explicitly approve** (Settings → Behavior → Computer use). Nothing else on the disk is reachable.
+- **Credentials are always off-limits**: SSH/GPG/AWS keys, keychains, `.env` files, tokens and Toplix Pro's own data are blocked even inside approved folders.
+- **Every file write and every command** is shown in a native approval dialog with the exact target and command before it runs. There is no "always allow" option.
+- Commands **never run elevated** (`sudo` is blocked), destructive and self-hiding commands are blocked outright, and each command is killed after 60 seconds with capped output.
+- Everything the AI does is recorded in a local audit log.
+
+If the AI asks for something outside these rules, the app itself refuses — the safety lives in the Electron main process, so the renderer and the model cannot relax it.
 
 ## Install
 

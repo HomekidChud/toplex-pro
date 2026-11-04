@@ -20,3 +20,14 @@ contextBridge.exposeInMainWorld('toplexNative', {
   secureRemove: (key) => ipcRenderer.invoke('native:secure-remove', key),
   openExternal: (url) => ipcRenderer.invoke('open-magic-link', url)
 });
+
+// Computer Use (sandboxed agent mode). All safety rules live in the main
+// process — the renderer can only ask, never relax them.
+contextBridge.exposeInMainWorld('toplexComputer', {
+  status: () => ipcRenderer.invoke('computer:status'),
+  setEnabled: (on) => ipcRenderer.invoke('computer:set-enabled', on),
+  addRoot: () => ipcRenderer.invoke('computer:add-root'),
+  removeRoot: (root) => ipcRenderer.invoke('computer:remove-root', root),
+  log: () => ipcRenderer.invoke('computer:log'),
+  call: (tool, args) => ipcRenderer.invoke('computer:call', tool, args)
+});

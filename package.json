@@ -1,8 +1,8 @@
 {
   "name": "toplex-pro",
   "productName": "Toplix Pro",
-  "version": "1.6.0",
-  "description": "Toplix Pro \u2014 a fast, focused AI coding assistant for macOS, Windows, Linux and Android. Connect ChatGPT, Codex, Claude, OpenRouter or any OpenAI-compatible endpoint.",
+  "version": "1.7.0",
+  "description": "Toplix Pro — a fast, focused AI coding assistant for macOS, Windows, Linux and Android. Connect ChatGPT, Codex, Claude, OpenRouter or any OpenAI-compatible endpoint.",
   "author": "HomekidChud",
   "license": "LicenseRef-LICENSE",
   "main": "main.js",
@@ -19,7 +19,16 @@
   "build": {
     "appId": "com.homekidchud.toplexpro",
     "productName": "Toplix Pro",
-    "copyright": "Copyright \u00a9 2026 HomekidChud. All rights reserved.",
+    "protocols": [
+      {
+        "name": "Toplix Pro sign-in",
+        "schemes": [
+          "toplex"
+        ],
+        "role": "Viewer"
+      }
+    ],
+    "copyright": "Copyright © 2026 HomekidChud. All rights reserved.",
     "directories": {
       "output": "dist"
     },

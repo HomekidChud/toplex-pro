@@ -811,3 +811,71 @@ input[type='range'] { width: 100%; accent-color: var(--color-primary); }
   .settings-tab { white-space: nowrap; }
   .composer textarea { min-height: 2.4em; }
 }
+
+/* ---------- Mode toggle (chat / computer use) ---------- */
+.mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-deep);
+  flex: none;
+}
+.mode-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: 500 var(--text-xs)/1 var(--font-body);
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mode-btn:hover { color: var(--color-text); }
+.mode-btn.active {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* ---------- Computer-use set-up banner ---------- */
+.computer-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 16px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-primary);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  color: var(--color-text);
+  font-size: var(--text-xs);
+}
+.computer-banner[hidden] { display: none; }
+.computer-banner .link-btn { flex: none; margin-left: auto; }
+
+/* ---------- Computer-use settings ---------- */
+.computer-root-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+.computer-root-row:last-child { border-bottom: none; }
+.computer-root-path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-size='phone'] .mode-toggle, [data-size='phone'] .computer-banner .link-btn { display: none; }
+[data-size='phone'] .computer-banner { margin: 8px 10px 0; }

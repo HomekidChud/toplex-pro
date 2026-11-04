@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta name="toplix-version" content="1.6.0">
+  <meta name="toplix-version" content="1.7.0">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#f7f7f8" />
@@ -78,6 +78,12 @@
         </button>
       </div>
 
+      <div class="computer-banner" id="computer-banner" hidden>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+        <span class="computer-banner-text"></span>
+        <button class="link-btn" id="computer-setup" data-testid="button-computer-setup">Turn on & choose folders</button>
+      </div>
+
       <div class="messages" id="messages" data-testid="container-messages"></div>
 
       <!-- Empty state template -->
@@ -112,6 +118,10 @@
         <div class="composer" id="composer">
           <textarea id="composer-input" rows="1" placeholder="Ask anything. @ files, $ skills, / commands" aria-label="Message" data-testid="input-message"></textarea>
           <div class="composer-row">
+            <div class="mode-toggle" id="mode-toggle" hidden role="tablist" aria-label="Assistant mode" data-testid="toggle-mode">
+              <button class="mode-btn" data-mode="chat" role="tab" aria-selected="true" title="Normal chat — the AI answers in the chat window" data-testid="button-mode-chat">Chat</button>
+              <button class="mode-btn" data-mode="computer" role="tab" aria-selected="false" title="Computer use — the AI can read, write and run commands on this computer, inside folders you approve, asking before every change" data-testid="button-mode-computer">Computer</button>
+            </div>
             <div class="model-picker" id="model-picker">
               <button class="model-pill" id="model-picker-btn" aria-haspopup="listbox" aria-expanded="false" data-testid="button-model">
                 <span class="pill-dot" id="model-dot" aria-hidden="true"></span>
@@ -265,6 +275,30 @@
               </div>
             </div>
           </div>
+
+          <div class="card-group" id="computer-settings-group" hidden>
+            <div class="card-group-title">Computer use</div>
+            <div class="card">
+              <div class="card-row toggle-row">
+                <div class="card-row-text">
+                  <div class="card-row-title">Let the AI use this computer</div>
+                  <div class="card-row-sub">Strictly sandboxed: only the folders you approve below, credentials and keychains are always blocked, and every file write or command is shown to you in an approval dialog before it runs. There is no “always allow”.</div>
+                </div>
+                <input type="checkbox" id="setting-computer-enabled" class="switch" />
+              </div>
+              <div class="card-row" style="display:block">
+                <div class="card-row-title" style="font-size:var(--text-sm);font-weight:600">Approved folders</div>
+                <div class="card-row-sub" style="margin-bottom:var(--space-2)">The AI can only see and change files inside these folders.</div>
+                <div id="computer-roots"></div>
+                <div class="card-row" style="border-top:none;padding-top:0">
+                  <button class="btn ghost" id="computer-add-root" type="button">Add a folder</button>
+                </div>
+              </div>
+              <div class="card-row" style="display:block">
+                <div class="card-row-sub">Blocked by rule, always: sudo and elevated commands, destructive commands (disk wiping, mass deletes), anything that hides its tracks, and credentials (SSH keys, keychains, .env, tokens). Commands are killed after 60 seconds. Everything the AI does is written to a local audit log.</div>
+              </div>
+            </div>
+          </div>
         </section>
 
         <!-- Appearance -->
@@ -295,7 +329,7 @@
         <section class="settings-pane" data-pane="about">
           <div class="about-block">
             <div class="brand about-brand"><span class="brand-mark" aria-hidden="true">T</span><span class="brand-name">Toplix <em>Pro</em></span></div>
-            <p>Version 1.6.0 · macOS, Windows, Linux, Android, iOS</p>
+            <p>Version 1.7.0 · macOS, Windows, Linux, Android, iOS</p>
             <p>A focused AI coding assistant built with Electron, in the spirit of T3 Code. Your chats and API keys never leave your machine.</p>
             <p class="about-license">© 2026 HomekidChud. All rights reserved. See LICENSE for terms.</p>
           </div>
@@ -325,6 +359,7 @@
   <script src="local-models.js"></script>
   <script src="doctor.js"></script>
   <script src="mobile-bridge.js"></script>
+  <script src="computer-use.js"></script>
   <script src="onboarding.js"></script>
   <script src="app.js"></script>
 </body>
