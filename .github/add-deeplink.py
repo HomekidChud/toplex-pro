@@ -1,4 +1,7 @@
-"""Add a toplex:// deep-link intent filter to the Capacitor Android manifest."""
+"""Patch the generated Capacitor Android manifest:
+ - toplex:// deep link (returns the user to the app after browser sign-in)
+ - <queries> so the app can tell whether ChatGPT / Claude are installed
+"""
 import sys
 p = sys.argv[1]
 s = open(p).read()
@@ -11,4 +14,13 @@ intent = '''
             </intent-filter>
         '''
 i = s.index('</activity>')
-open(p, 'w').write(s[:i] + intent + s[i:])
+s = s[:i] + intent + s[i:]
+queries = '''
+    <queries>
+        <package android:name="com.openai.chatgpt" />
+        <package android:name="com.anthropic.claude" />
+    </queries>
+'''
+j = s.index('<application')
+s = s[:j] + queries.lstrip('\n') + '    ' + s[j:]
+open(p, 'w').write(s)

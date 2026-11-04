@@ -118,7 +118,10 @@
   }
 
   function persist() {
-    storeSet('toplex.settings', JSON.stringify(state.settings));
+    var toStore = JSON.parse(JSON.stringify(state.settings));
+    // Sign in with ChatGPT tokens live in the encrypted native store, never in browser storage
+    if (toStore.providers.openai.authMethod === 'chatgpt') toStore.providers.openai.apiKey = '';
+    storeSet('toplex.settings', JSON.stringify(toStore));
     storeSet('toplex.chats', JSON.stringify(state.chats.slice(0, 200)));
   }
 
@@ -620,27 +623,58 @@
   }
 
   /* ---------------- OpenAI Responses API ---------------- */
-  function streamOpenAIResponses(p, cfg, history, msg, bodyEl) {
+  function usingChatGptPlan(cfg) { return cfg.authMethod === 'chatgpt' && window.ToplixSIWC && window.ToplixSIWC.active; }
+
+  // Bearer token: a fresh ChatGPT-plan token when signed in with ChatGPT, otherwise the API key
+  function bearerFor(cfg) {
+    if (usingChatGptPlan(cfg)) {
+      return window.ToplixSIWC.accessToken().then(function (t) { cfg.apiKey = t; return t; });
+    }
+    return Promise.resolve(cfg.apiKey);
+  }
+
+  // Build a Responses API body. ChatGPT-plan requests must use store:false + stream:true,
+  // carry the system prompt in `instructions`, and omit unsupported fields.
+  function responsesBody(cfg, history, extra, wantStream) {
     var input = history.map(function (m) {
+      if (m.type) return m;   // function_call / function_call_output items pass through
       return { role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content };
     });
-    if (state.settings.systemPrompt) input.unshift({ role: 'system', content: state.settings.systemPrompt });
+    var body = { model: cfg.model, input: input };
+    if (usingChatGptPlan(cfg)) {
+      if (state.settings.systemPrompt) body.instructions = state.settings.systemPrompt;
+      body.store = false; body.stream = true;
+    } else {
+      if (state.settings.systemPrompt) input.unshift({ role: 'system', content: state.settings.systemPrompt });
+      if (wantStream) body.stream = true;
+    }
+    return Object.assign(body, extra || {});
+  }
 
+  // Read an SSE stream to the end and return the final response object
+  function collectResponse(res) {
+    var final = null, text = '';
+    return readSSE(res, function (event) {
+      if (event.type === 'response.output_text.delta' && event.delta) text += event.delta;
+      if (event.type === 'response.completed' || event.type === 'response.incomplete') final = event.response;
+      if (event.type === 'response.failed') throw new Error((event.response && event.response.error && event.response.error.message) || 'Response failed');
+    }).then(function () { return final || { output: [{ content: [{ text: text }] }] }; });
+  }
+
+  function streamOpenAIResponses(p, cfg, history, msg, bodyEl) {
+    var wantStream = !!state.settings.stream || usingChatGptPlan(cfg);
+    return bearerFor(cfg).then(function (token) {
     return fetch(cfg.baseUrl + '/responses', {
       method: 'POST',
       signal: state.abort.signal,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + cfg.apiKey
+        'Authorization': 'Bearer ' + token
       },
-      body: JSON.stringify({
-        model: cfg.model,
-        input: input,
-        stream: !!state.settings.stream
-      })
-    }).then(function (res) {
+      body: JSON.stringify(responsesBody(cfg, history, null, wantStream))
+    }); }).then(function (res) {
       return assertOk(res).then(function () {
-        if (!state.settings.stream) {
+        if (!wantStream) {
           return res.json().then(function (data) {
             var out = (data.output || []).map(function (o) {
               return (o.content || []).map(function (c) { return c.text || ''; }).join('');
@@ -799,22 +833,18 @@
   }
 
   async function openaiResponsesTools(p, cfg, history, defs) {
-    var input = history.map(function (m) {
-      return { role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content };
-    });
-    if (state.settings.systemPrompt) input.unshift({ role: 'system', content: state.settings.systemPrompt });
+    var token = await bearerFor(cfg);
     var res = await fetch(cfg.baseUrl + '/responses', {
       method: 'POST', signal: state.abort.signal,
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey },
-      body: JSON.stringify({
-        model: cfg.model, input: input,
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify(responsesBody(cfg, history, {
         tools: defs.map(function (d) {
           return { type: 'function', name: d.name, description: d.description, parameters: d.input_schema, strict: false };
         })
-      })
+      }, false))
     });
     await assertOk(res);
-    var data = await res.json();
+    var data = usingChatGptPlan(cfg) ? await collectResponse(res) : await res.json();
     var toolCalls = [];
     var text = '';
     (data.output || []).forEach(function (item) {
@@ -974,43 +1004,62 @@
     }
   }
 
-  /* ---------------- ChatGPT magic link ---------------- */
-  function startChatGptAuth() {
-    var base = ($('#chatgpt-auth-url').value || '').trim() || 'https://chatgpt.com/oauth/authorize';
-    var url = base;
-    try {
-      var u = new URL(base);
-      if (!u.searchParams.has('redirect_uri')) u.searchParams.set('redirect_uri', 'toplex://auth/callback');
-      if (!u.searchParams.has('response_type')) u.searchParams.set('response_type', 'code');
-      url = u.toString();
-    } catch (e) { /* use raw */ }
-    if (window.toplex && window.toplex.openMagicLink) {
-      window.toplex.openMagicLink(url)
-        .then(function () { toast('Browser opened — finish signing in, then Toplix Pro picks up the token'); })
-        .catch(function (e) { toast(e.message, true); });
-    } else {
-      window.open(url, '_blank');
-      toast('Browser opened — the desktop app receives the token automatically');
+  /* ---------------- Sign in with ChatGPT ---------------- */
+  function applyChatGptSession(session) {
+    var cfg = state.settings.providers.openai;
+    if (session && session.access_token) {
+      cfg.authMethod = 'chatgpt';
+      cfg.apiKey = session.access_token;
+      state.settings.activeProvider = 'openai';
+      refreshChatGptModels();
+    } else if (cfg.authMethod === 'chatgpt') {
+      cfg.authMethod = '';
+      cfg.apiKey = '';
     }
+    persist();
+    renderModelMenu();
+    updateModelUI();
+    updateChatGptStatus();
   }
 
-  function handleAuthCallback(url) {
-    try {
-      var qs = '';
-      if (url.indexOf('?') !== -1) qs += url.slice(url.indexOf('?') + 1);
-      if (url.indexOf('#') !== -1) qs += '&' + url.slice(url.indexOf('#') + 1);
-      var params = new URLSearchParams(qs);
-      var token = params.get('access_token') || params.get('token') || params.get('api_key') || params.get('code');
-      if (!token) { toast('Sign-in callback contained no token', true); return; }
-      state.settings.providers.openai.apiKey = token;
-      state.settings.providers.openai.authMethod = 'chatgpt';
-      persist();
-      updateModelUI();
-      $('#chatgpt-auth-status').textContent = 'Signed in with ChatGPT — token saved';
-      toast('ChatGPT account connected');
-    } catch (e) {
-      toast('Could not read the sign-in callback', true);
+  function refreshChatGptModels() {
+    window.ToplixSIWC.listModels().then(function (models) {
+      if (!models.length) return;
+      PROVIDERS.openai.models = models.map(function (m) { return m.slug; });
+      var cfg = state.settings.providers.openai;
+      if (PROVIDERS.openai.models.indexOf(cfg.model) === -1) cfg.model = PROVIDERS.openai.models[0];
+      persist(); renderModelMenu(); updateModelUI();
+    }).catch(function () { /* keep the built-in list */ });
+  }
+
+  function updateChatGptStatus() {
+    var statusEl = $('#chatgpt-auth-status');
+    var btn = $('#chatgpt-signin');
+    if (!statusEl || !btn) return;
+    var siwc = window.ToplixSIWC, openaiCfg = state.settings.providers.openai;
+    if (siwc && siwc.active) {
+      var acct = siwc.account || {};
+      statusEl.textContent = 'Signed in with ChatGPT' + (acct.email ? ' as ' + acct.email : '') + ' — using your ChatGPT plan';
+      btn.textContent = 'Sign out';
+    } else {
+      statusEl.textContent = openaiCfg.apiKey ? 'Using an OpenAI API key (Models tab)' : 'Not signed in — or paste an OpenAI API key on the Models tab.';
+      btn.textContent = 'Continue with ChatGPT';
     }
+    btn.disabled = !(siwc && siwc.supported);
+    btn.title = btn.disabled ? 'Available in the desktop and Android apps' : '';
+  }
+
+  function onChatGptButton() {
+    var siwc = window.ToplixSIWC;
+    if (siwc.active) {
+      siwc.signOut().then(function () { toast('Signed out of ChatGPT'); });
+      return;
+    }
+    $('#chatgpt-signin').disabled = true;
+    toast('Finish signing in in your browser…');
+    siwc.signIn().then(function () { toast('ChatGPT account connected'); })
+      .catch(function (e) { toast(e.message, true); })
+      .then(updateChatGptStatus);
   }
 
   /* ---------------- MCP settings UI ---------------- */
@@ -1086,7 +1135,9 @@
       keyLabel.setAttribute('for', 'key-' + pid);
       var keyInput = el('input');
       keyInput.type = 'password'; keyInput.id = 'key-' + pid;
-      keyInput.placeholder = p.keyHint; keyInput.value = cfg.apiKey || '';
+      keyInput.placeholder = p.keyHint;
+      if (pid === 'openai' && cfg.authMethod === 'chatgpt') { keyInput.value = ''; keyInput.placeholder = 'Signed in with ChatGPT'; keyInput.disabled = true; }
+      else keyInput.value = cfg.apiKey || '';
       keyInput.dataset.testid = 'input-key-' + pid;
       keyInput.autocomplete = 'off';
       var reveal = el('button', 'key-reveal', 'Show');
@@ -1140,11 +1191,7 @@
       if (on) $('#settings-crumb').textContent = tab.textContent;
     });
     $('#setting-dark').checked = currentTheme() === 'dark';
-    $('#chatgpt-auth-url').value = state.settings.chatgptAuthUrl || '';
-    var openaiCfg = state.settings.providers.openai;
-    $('#chatgpt-auth-status').textContent = openaiCfg.authMethod === 'chatgpt'
-      ? 'Signed in with ChatGPT — token saved'
-      : (openaiCfg.apiKey ? 'API key set on the Models tab' : 'Not signed in — or paste an OpenAI API key on the Models tab.');
+    updateChatGptStatus();
     renderMcpSettings();
     $('#setting-system').value = state.settings.systemPrompt;
     $('#setting-temp').value = state.settings.temperature;
@@ -1163,7 +1210,7 @@
       var keyEl = $('#key-' + pid);
       var modelEl = $('#model-' + pid);
       var urlEl = $('#url-' + pid);
-      if (keyEl) cfg.apiKey = keyEl.value.trim();
+      if (keyEl && !keyEl.disabled) { cfg.apiKey = keyEl.value.trim(); if (pid === 'openai' && cfg.apiKey) cfg.authMethod = ''; }
       if (modelEl) cfg.model = modelEl.value.trim() || PROVIDERS[pid].defaultModel;
       if (urlEl) cfg.baseUrl = urlEl.value.trim() || PROVIDERS[pid].baseUrl;
     });
@@ -1173,7 +1220,6 @@
     state.settings.stream = $('#setting-stream').checked;
     var wantDark = $('#setting-dark').checked;
     if (wantDark !== (currentTheme() === 'dark')) toggleTheme();
-    state.settings.chatgptAuthUrl = ($('#chatgpt-auth-url').value || '').trim();
     persist();
     refreshMcpTools();
     closeSettings();
@@ -1289,11 +1335,9 @@
       $('#temp-value').textContent = e.target.value;
     });
 
-    // ChatGPT magic link
-    $('#chatgpt-signin').addEventListener('click', startChatGptAuth);
-    if (window.toplex && window.toplex.onAuthCallback) {
-      window.toplex.onAuthCallback(handleAuthCallback);
-    }
+    // Sign in with ChatGPT
+    $('#chatgpt-signin').addEventListener('click', onChatGptButton);
+    window.ToplixSIWC.onChange(applyChatGptSession);
 
     // MCP server management
     $('#mcp-add-btn').addEventListener('click', function () {
@@ -1314,6 +1358,14 @@
     refreshMcpTools();
 
     // Drawer / placeholder / layout adaptation lives in adaptive.js
+
+    // Hand control to the first-run gate (permissions + sign-in) before the app can be used
+    window.ToplixApp = {
+      state: state, PROVIDERS: PROVIDERS, persist: persist, toast: toast,
+      renderModelMenu: renderModelMenu, updateModelUI: updateModelUI,
+      applyChatGptSession: applyChatGptSession, isProviderConnected: isProviderConnected
+    };
+    if (window.ToplixOnboarding) window.ToplixOnboarding.start();
 
     // Start with an empty chat view
     if (!state.chats.length) {

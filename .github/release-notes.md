@@ -1,11 +1,10 @@
 Toplix Pro __VERSION__ is now available on macOS, Windows, Linux and Android.
 
 ## What's new
-- Adaptive UI: the layout now adapts automatically to phones, tablets, laptops and large monitors, in portrait or landscape.
-- Phones and small tablets: slide-out sidebar (swipe from the left edge, tap outside to close, auto-closes after you pick a chat), full-screen settings, bottom-sheet model picker, Android back button support.
-- Touch screens get 44px tap targets and always-visible message actions; keyboard hints are hidden.
-- Large screens get a wider sidebar, wider reading column and scaled-up text.
-- Respects notches and system bars, short landscape windows, and the system light/dark setting until you pick a theme.
+- First-run permissions: before anything else, Toplix Pro asks for internet access to your chosen AI provider and, on Android, an optional installed-or-not check for the ChatGPT and Claude apps. It never reads other apps' network traffic or data.
+- Required sign-in: continue with ChatGPT (official Sign in with ChatGPT, uses your ChatGPT plan), connect Claude with an Anthropic API key, or use any provider API key.
+- ChatGPT tokens are stored encrypted (Android Keystore / OS keychain) and refreshed automatically.
+- Adaptive UI from 1.3.1 carries over.
 
 ## Downloads
 | Device | File |

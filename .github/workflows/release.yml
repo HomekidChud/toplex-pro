@@ -87,6 +87,7 @@ jobs:
           CODE=$(node -e "const [a,b,c]=require('../package.json').version.split('.').map(Number);console.log(a*10000+b*100+c)")
           sed -i "s/versionCode 1/versionCode $CODE/; s/versionName \"1.0\"/versionName \"$VERSION\"/" android/app/build.gradle
           python3 ../.github/add-deeplink.py android/app/src/main/AndroidManifest.xml
+          cp native/ToplixNativePlugin.java native/MainActivity.java android/app/src/main/java/com/homekidchud/toplexpro/
 
       - name: Sync web assets
         working-directory: mobile
