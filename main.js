@@ -13,8 +13,9 @@ function createWindow() {
     minWidth: 640,
     minHeight: 480,
     backgroundColor: '#f7f7f8',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 14, y: 14 },
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 14 } }
+      : { autoHideMenuBar: true }),
     show: false,
     webPreferences: {
       contextIsolation: true,

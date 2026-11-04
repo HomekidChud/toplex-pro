@@ -3,3 +3,6 @@ dist/
 .DS_Store
 *.dmg
 npm-debug.log*
+mobile/node_modules/
+mobile/android/
+mobile/www/

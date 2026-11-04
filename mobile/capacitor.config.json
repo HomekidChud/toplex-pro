@@ -1,0 +1,10 @@
+{
+  "appId": "com.homekidchud.toplexpro",
+  "appName": "Toplix Pro",
+  "webDir": "www",
+  "backgroundColor": "#f7f7f8",
+  "android": {
+    "adjustMarginsForEdgeToEdge": "force",
+    "allowMixedContent": true
+  }
+}
