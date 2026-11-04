@@ -1,3 +1,20 @@
+# Toplix Pro — Installing on iPhone and iPad
+
+Apple only runs apps that are signed. Toplix Pro is not in the App Store, so the iOS download (`Toplix-Pro-<version>-ios.ipa`) is unsigned and has to be signed with your own Apple ID by a sideloading tool. This is free but has limits.
+
+1. Download `Toplix-Pro-<version>-ios.ipa` from the Releases page on your computer.
+2. Install it with one of these tools (follow that tool's own guide):
+   - **AltStore** (altstore.io) or **SideStore** — refreshes the app automatically while the computer or your Wi-Fi is available.
+   - **Sideloadly** (sideloadly.io) — a simple desktop app: plug in the iPhone, drop in the file, enter your Apple ID.
+3. On the iPhone, open Settings, General, VPN & Device Management, tap your Apple ID and choose Trust.
+4. On iOS 16 and later, also turn on Developer Mode (Settings, Privacy & Security, Developer Mode) if the tool asks for it.
+
+Limits of a free Apple ID: apps expire after 7 days and must be refreshed (AltStore does that for you), and you can have three sideloaded apps at once. A paid Apple Developer account lasts a year. Installing a newer `.ipa` with the same tool and Apple ID updates the app and keeps your chats and settings.
+
+On-device models are not available on iOS in this release. Use an online provider, or the Custom provider with Ollama or LM Studio on your computer (use the computer's Wi-Fi address, not localhost).
+
+---
+
 # Toplix Pro — Installation Guide (macOS)
 
 ## Option 1: Download the DMG (easiest)

@@ -1,6 +1,6 @@
 # Toplix Pro
 
-A fast, focused AI coding assistant for macOS, Windows, Linux and Android — inspired by the best parts of Codex, Claude Code and modern chat UIs. One window, your models, zero clutter.
+A fast, focused AI coding assistant for macOS, Windows, Linux, Android and iOS — inspired by the best parts of Codex, Claude Code and modern chat UIs. One window, your models, zero clutter.
 
 ![Toplix Pro](renderer/icon.png)
 
@@ -16,7 +16,7 @@ A fast, focused AI coding assistant for macOS, Windows, Linux and Android — in
 
 ## Install
 
-Downloads for every device are on the [Releases](../../releases) page: macOS (`.dmg`), Windows (`.exe`), Linux (`.AppImage` / `.deb`) and Android (`.apk`).
+Downloads for every device are on the [Releases](../../releases) page: macOS (`.dmg`), Windows (`.exe`), Linux (`.AppImage` / `.deb`) Android (`.apk`) and iOS (`.ipa`, sideloaded, see INSTALL.md).
 
 ### macOS
 

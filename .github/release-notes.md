@@ -1,12 +1,10 @@
-Toplix Pro __VERSION__ is now available on macOS, Windows, Linux and Android.
+Toplix Pro __VERSION__ is now available on macOS, Windows, Linux, Android and iOS.
 
 ## What's new
-- Run AI models on your phone (Android, 64-bit ARM). Open the first-run screen or Settings, choose "On this phone", and pick a model: Qwen2.5 0.5B or 1.5B, Gemma 3 1B (needs a free Hugging Face token) or a tiny test model. You can also import your own `.task` or `.litertlm` file.
-- Toplix Pro asks your permission before using the phone GPU, storing model files and downloading from huggingface.co. Android has no separate GPU permission, so the app asks itself. You can choose CPU only, and it falls back to CPU if the GPU cannot start.
-- Chats with a local model stay on the phone and work offline once the model is downloaded. Local models do not use tools.
-- The Custom provider now lists the models from Ollama or LM Studio automatically, and Android allows plain http addresses on your Wi-Fi (for example http://192.168.1.20:11434/v1).
-- Updates install over 1.4.1 and later without uninstalling. The APK is about 20 MB larger because of the on-device engine.
-- This is the first release of the on-device engine and has not been verified on every phone. Recent flagship phones (Pixel 8, Galaxy S23 or newer) work best.
+- iPhone and iPad: a new `.ipa` download. Apple requires apps to be signed, so install it with AltStore, SideStore or Sideloadly using your own Apple ID (steps in INSTALL.md). On-device models are not included on iOS yet.
+- Device diagnostics: Settings, Diagnostics (also reachable from the sign-in screens). It checks the internet connection, the device clock, storage, saved settings and chats, key formatting, ChatGPT sign-in, on-device models, the GPU and new releases. It explains each problem in plain words and fixes things only after you review the exact changes and allow them. It also checks quietly at start-up and offers to review serious problems. Reports never include keys or tokens.
+- GPU fixes on Android: the app now declares the phone's OpenCL libraries (needed on Android 12 and later), remembers whether the GPU worked for each model, and detects when a GPU start closed the app. In that case the GPU is switched off automatically and the diagnostics explain it and offer to try again.
+- Android 1.5.x installs update to 1.6.0 without uninstalling.
 
 ## Downloads
 | Device | File |
@@ -17,6 +15,7 @@ Toplix Pro __VERSION__ is now available on macOS, Windows, Linux and Android.
 | Linux (any distro) | `Toplix-Pro-__VERSION__-linux-x86_64.AppImage` |
 | Linux (Debian/Ubuntu) | `Toplix-Pro-__VERSION__-linux-amd64.deb` |
 | Android 7.0+ | `Toplix-Pro-__VERSION__-android.apk` |
+| iPhone / iPad (sideload) | `Toplix-Pro-__VERSION__-ios.ipa` |
 
 ## Install notes
 - macOS: open the DMG, drag to Applications. If macOS says the app is damaged: `xattr -dr com.apple.quarantine '/Applications/Toplix Pro.app'`. See INSTALL.md.
