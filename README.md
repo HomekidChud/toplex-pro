@@ -6,9 +6,10 @@ A fast, focused AI coding assistant for macOS, Windows, Linux, Android and iOS �
 
 ## Features
 
-- **Multi-provider models** — connect OpenAI (ChatGPT & Codex models), Anthropic (Claude), OpenRouter, or any OpenAI-compatible endpoint (Ollama, LM Studio, Groq…)
+- **Multi-provider models** — connect OpenAI (ChatGPT & Codex models), Anthropic (Claude), OpenRouter, or any OpenAI-compatible endpoint (Ollama, LM Studio, Groq…). The model picker shows a **FREE / PAID / LOCAL** badge on every model and a legend, so free options (on-device models, `:free` OpenRouter variants, GLM flash) are easy to spot
 - **MCP tool servers** — connect Model Context Protocol servers (streamable HTTP) and the model can call their tools mid-conversation, with collapsible tool cards in the chat
-- **Two modes on desktop** — switch between **Chat** (normal chat) and **Computer** (computer use): the AI can read, write and run commands on your computer, but only inside folders you approve, never near credentials, and every write or command is shown to you for approval before it runs (more below)
+- **Two modes on desktop** — switch between **Chat** (normal chat) and **Computer** (computer use): the AI gets its own Chromium browser with its own visible mouse cursor, can open apps and tabs, read/write files and run commands — under a permission system you control (manual approval or "approve for me", and optional full computer access)
+- **Live token meter** — every assistant message shows a tokens/second readout that updates continuously while it streams, plus the message's total tokens and the chat's running total, right next to the like/dislike buttons
 - **ChatGPT magic-link sign-in** — sign in from chatgpt.com in your browser; Toplix Pro receives the token automatically via its custom URL scheme
 - **Streaming responses** with markdown rendering, syntax-highlighted code blocks and one-click copy
 - **Chat history** with a searchable sidebar, stored locally
@@ -20,13 +21,28 @@ A fast, focused AI coding assistant for macOS, Windows, Linux, Android and iOS �
 The toggle next to the model picker switches between:
 
 1. **Chat** — normal chat. The AI answers in the chat window and cannot touch your computer.
-2. **Computer** — computer use. The AI gets four tools (`computer_list_files`, `computer_read_file`, `computer_write_file`, `computer_run_command`) and can do real work on your machine under strict rules enforced by the app itself, not by the model's good behaviour:
+2. **Computer** — computer use. The AI gets a full toolset (`computer_list_files`, `computer_read_file`, `computer_write_file`, `computer_run_command`, `computer_list_apps`, `computer_open_app`, `computer_open_url`, and the AI Browser tools below) and can do real work on your machine under strict rules enforced by the app itself, not by the model's good behaviour:
 
-- It can only see and change files inside **folders you explicitly approve** (Settings → Behavior → Computer use). Nothing else on the disk is reachable.
-- **Credentials are always off-limits**: SSH/GPG/AWS keys, keychains, `.env` files, tokens and Toplix Pro's own data are blocked even inside approved folders.
-- **Every file write and every command** is shown in a native approval dialog with the exact target and command before it runs. There is no "always allow" option.
+### Permissions: manual or "approve for me"
+
+- **Manual (default)** — every file write, command and app launch is shown in a native approval dialog with the exact target and command before it runs. Any dialog also offers **"Approve for me — auto from now on"**, which switches to auto mode on the spot.
+- **Approve for me (auto)** — the AI can work without stopping for approvals. Everything is still written to the local audit log, and you can switch back to manual any time in Settings.
+- **Full computer access** — optional, and off by default. When you switch it on (Settings, or from the mode banner), the AI can read and change files anywhere on the computer and open any app — not just inside approved folders. Turning it on asks for confirmation first.
+- **Credentials are always off-limits**, whatever you choose: SSH/GPG/AWS keys, keychains, `.env` files, tokens and Toplix Pro's own data are blocked even with full access.
 - Commands **never run elevated** (`sudo` is blocked), destructive and self-hiding commands are blocked outright, and each command is killed after 60 seconds with capped output.
 - Everything the AI does is recorded in a local audit log.
+
+### The AI Browser and the AI's own mouse
+
+The AI gets its own embedded Chromium browser — a separate window the user can watch:
+
+- `browser_open` / `browser_new_tab` / `browser_tabs` / `browser_close_tab` — open sites, manage tabs (links that open new windows become new tabs automatically)
+- `browser_read_page` — title, URL, visible text and links of the active tab
+- `browser_screenshot` — saves a PNG the user can open; coordinates match `browser_click` x/y
+- `browser_click` / `browser_click_selector` / `browser_type` / `browser_key` / `browser_scroll` / `browser_back` / `browser_forward` — act on pages
+- `ai_mouse_move` / `ai_mouse_click` — the AI has **its own visible mouse cursor**: a purple pointer with an "AI" badge that moves and clicks inside the AI Browser. The user's real mouse is never moved or captured — clicks are injected into the browser's page, and the cursor the user sees is an overlay drawing.
+
+The AI Browser is the AI's sandbox: pages it opens, tabs it manages and clicks it makes happen there, never in the user's own browser. Opening a link in the user's default browser (`computer_open_url` with `where:"default"`) is a separate action that needs approval in manual mode.
 
 If the AI asks for something outside these rules, the app itself refuses — the safety lives in the Electron main process, so the renderer and the model cannot relax it.
 

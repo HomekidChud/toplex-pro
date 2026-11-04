@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('toplexNative', {
 contextBridge.exposeInMainWorld('toplexComputer', {
   status: () => ipcRenderer.invoke('computer:status'),
   setEnabled: (on) => ipcRenderer.invoke('computer:set-enabled', on),
+  setApprovalMode: (mode) => ipcRenderer.invoke('computer:set-approval-mode', mode),
+  setFullAccess: (on) => ipcRenderer.invoke('computer:set-full-access', on),
   addRoot: () => ipcRenderer.invoke('computer:add-root'),
   removeRoot: (root) => ipcRenderer.invoke('computer:remove-root', root),
   log: () => ipcRenderer.invoke('computer:log'),

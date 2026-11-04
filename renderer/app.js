@@ -24,7 +24,8 @@
       baseUrl: 'https://api.openai.com/v1',
       keyHint: 'sk-…',
       models: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-5.6-sol'],
-      defaultModel: 'gpt-6.1-sol'
+      defaultModel: 'gpt-6.1-sol',
+      pricing: 'paid API'
     },
     anthropic: {
       id: 'anthropic',
@@ -34,37 +35,41 @@
       baseUrl: 'https://api.anthropic.com/v1',
       keyHint: 'sk-ant-…',
       models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
-      defaultModel: 'claude-sonnet-5-5'
+      defaultModel: 'claude-sonnet-5-5',
+      pricing: 'paid API'
     },
     openrouter: {
       id: 'openrouter',
       name: 'OpenRouter',
-      desc: 'One key, hundreds of models from every major lab.',
+      desc: 'One key, hundreds of models from every major lab. Models ending in :free cost nothing.',
       kind: 'openai-chat',
       baseUrl: 'https://openrouter.ai/api/v1',
       keyHint: 'sk-or-…',
-      models: ['openai/gpt-6.1-sol', 'anthropic/claude-opus-5-5', 'google/gemini-3-pro', 'meta-llama/llama-4-maverick'],
-      defaultModel: 'anthropic/claude-opus-5-5'
+      models: ['openai/gpt-6.1-sol', 'anthropic/claude-opus-5-5', 'google/gemini-3-pro', 'meta-llama/llama-4-maverick', 'meta-llama/llama-4-maverick:free', 'deepseek/deepseek-chat:free', 'qwen/qwen3-coder:free'],
+      defaultModel: 'anthropic/claude-opus-5-5',
+      pricing: 'free & paid'
     },
     glm: {
       id: 'glm',
       name: 'Zhipu AI — GLM',
-      desc: 'Zhipu (bigmodel.cn) key. GLM-4 family — the same models AI Forge uses.',
+      desc: 'Zhipu (bigmodel.cn) key. GLM-4 family — the same models AI Forge uses. glm-4-flash is free.',
       kind: 'openai-chat',
       baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
       keyHint: 'paste your key',
       models: ['glm-4.6', 'glm-4.5', 'glm-4-flash', 'glm-4-plus'],
-      defaultModel: 'glm-4.6'
+      defaultModel: 'glm-4.6',
+      pricing: 'free & paid'
     },
     device: {
       id: 'device',
       name: 'On this phone — local models',
-      desc: 'Runs fully on this phone, on its GPU if you allow it. No account or key, works offline after a download.',
+      desc: 'Runs fully on this phone, on its GPU if you allow it. No account or key, works offline after a download. Always free.',
       kind: 'on-device',
       baseUrl: '',
       keyHint: '',
       models: [],
-      defaultModel: ''
+      defaultModel: '',
+      pricing: 'free'
     },
     custom: {
       id: 'custom',
@@ -74,7 +79,8 @@
       baseUrl: 'http://localhost:11434/v1',
       keyHint: 'optional',
       models: ['llama3.3', 'qwen2.5-coder', 'mistral-large'],
-      defaultModel: 'llama3.3'
+      defaultModel: 'llama3.3',
+      pricing: 'free on your machine'
     }
   };
 
@@ -365,6 +371,40 @@
         wrap.appendChild(body);
 
         var actions = el('div', 'msg-actions');
+
+        // Like / dislike — feedback is stored on the message
+        var like = el('button', 'msg-action msg-rate up' + (msg.rating === 'up' ? ' active' : ''));
+        like.type = 'button';
+        like.setAttribute('aria-label', 'Good response');
+        like.setAttribute('aria-pressed', msg.rating === 'up' ? 'true' : 'false');
+        like.dataset.testid = 'button-like-msg-' + idx;
+        like.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v11M15 21v-7h3a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2h-3.2l.5-3.3A2 2 0 0 0 13.3 3H12a1 1 0 0 0-1 .8L9.3 10H7z"/></svg>';
+        like.addEventListener('click', function () {
+          msg.rating = msg.rating === 'up' ? null : 'up';
+          persist();
+          renderMessages();
+        });
+        actions.appendChild(like);
+
+        var dislike = el('button', 'msg-action msg-rate down' + (msg.rating === 'down' ? ' active' : ''));
+        dislike.type = 'button';
+        dislike.setAttribute('aria-label', 'Bad response');
+        dislike.setAttribute('aria-pressed', msg.rating === 'down' ? 'true' : 'false');
+        dislike.dataset.testid = 'button-dislike-msg-' + idx;
+        dislike.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3M9 3v7H6a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h3.2l-.5 3.3A2 2 0 0 0 10.7 21H12a1 1 0 0 0 1-.8l1.7-6.2H17z"/></svg>';
+        dislike.addEventListener('click', function () {
+          msg.rating = msg.rating === 'down' ? null : 'down';
+          persist();
+          renderMessages();
+        });
+        actions.appendChild(dislike);
+
+        // Live token/s readout + total tokens used (fills while streaming)
+        var tok = el('span', 'token-meter');
+        tok.dataset.testid = 'text-token-meter-' + idx;
+        tok.textContent = tokenMeterText(msg, chat);
+        actions.appendChild(tok);
+
         var copyBtn = el('button', 'msg-action', 'Copy');
         copyBtn.dataset.testid = 'button-copy-msg-' + idx;
         copyBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy';
@@ -385,6 +425,73 @@
       }
     }
     return wrap;
+  }
+
+  /* ---------------- Token meter (live tok/s + totals) ----------------
+   * Shown next to the like/dislike buttons under every assistant message.
+   * While the response streams, a 1 ms loop keeps the tokens/s readout
+   * moving; when it finishes, the message's total tokens and the chat's
+   * running total are shown.
+   */
+  var meter = null;   // { msg, el, tokens, start, timer }
+
+  function approxTokens(text) { return Math.max(1, Math.round(String(text || '').length / 4)); }
+
+  function fmtInt(n) {
+    n = Math.round(n || 0);
+    return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n);
+  }
+
+  function chatTotalTokens(chat) {
+    var t = 0;
+    (chat && chat.messages || []).forEach(function (m) { t += (m.tokensOut || 0) + (m.tokensIn || 0); });
+    return t;
+  }
+
+  function tokenMeterText(msg, chat) {
+    if (!msg) return '';
+    var parts = [];
+    if (msg.tokensOut) parts.push(fmtInt(msg.tokensOut) + ' tok');
+    if (msg.tokensIn) parts.push(fmtInt(msg.tokensIn) + ' in');
+    if (msg.tokensOut && msg.tps) parts.push(fmtInt(msg.tps) + ' tok/s');
+    if (parts.length && chat) parts.push('chat ' + fmtInt(chatTotalTokens(chat)));
+    return parts.join(' · ');
+  }
+
+  function meterStart(msg, el, chat) {
+    meterStop();
+    msg.tokensOut = 0; msg.tokensIn = 0; msg.tps = 0;
+    meter = { msg: msg, el: el, chat: chat, tokens: 0, start: performance.now(), timer: null };
+    meter.timer = setInterval(function () {
+      if (!meter || !meter.el || !meter.el.isConnected) return;
+      var secs = (performance.now() - meter.start) / 1000;
+      var tps = secs > 0.2 ? meter.tokens / secs : 0;
+      meter.el.textContent = fmtInt(meter.tokens) + ' tok · ' + (tps >= 100 ? Math.round(tps) : tps.toFixed(1)) + ' tok/s' +
+        (meter.chat ? ' · chat ' + fmtInt(chatTotalTokens(meter.chat) + meter.tokens) : '');
+    }, 1);
+  }
+
+  function meterAdd(text) { if (meter) meter.tokens += approxTokens(text); }
+
+  function meterUsage(u) {
+    if (meter && u) {
+      if (u.out != null) meter.tokens = u.out;
+      if (u.in != null) meter.msg.tokensIn = u.in;
+      meter.msg.usageExact = true;
+    }
+  }
+
+  function meterStop() {
+    if (!meter) return;
+    if (meter.timer) clearInterval(meter.timer);
+    var m = meter.msg;
+    m.tokensOut = meter.tokens;
+    var secs = (performance.now() - meter.start) / 1000;
+    m.tps = secs > 0 ? Math.round(m.tokensOut / secs) : 0;
+    if (meter.el && meter.el.isConnected) {
+      meter.el.textContent = tokenMeterText(m, meter.chat);
+    }
+    meter = null;
   }
 
   function wireCopyButtons(scope) {
@@ -420,14 +527,42 @@
   }
 
   /* ---------------- Model picker ---------------- */
+  /* Free / paid badge for a model. Free = no API cost (free-tier models,
+   * OpenRouter :free variants, anything running on the user's own machine). */
+  function modelPricing(pid, model) {
+    if (pid === 'device') return 'free';
+    if (pid === 'custom') return 'local';
+    if (/:free$/i.test(model)) return 'free';
+    if (/^(glm-4-flash|glm-4\.5-flash)/i.test(model)) return 'free';
+    return 'paid';
+  }
+
+  function pricingBadge(kind) {
+    if (kind === 'free') return { cls: 'free', label: 'FREE' };
+    if (kind === 'local') return { cls: 'local', label: 'LOCAL' };
+    return { cls: 'paid', label: 'PAID' };
+  }
+
   function renderModelMenu() {
     var menu = $('#model-menu');
     menu.innerHTML = '';
+    var legend = el('div', 'model-menu-legend');
+    legend.appendChild(el('span', 'model-badge free', 'FREE'));
+    legend.appendChild(document.createTextNode(' no cost'));
+    legend.appendChild(el('span', 'legend-dot', '·'));
+    legend.appendChild(el('span', 'model-badge paid', 'PAID'));
+    legend.appendChild(document.createTextNode(' needs API credits'));
+    legend.appendChild(el('span', 'legend-dot', '·'));
+    legend.appendChild(el('span', 'model-badge local', 'LOCAL'));
+    legend.appendChild(document.createTextNode(' runs on your machine'));
+    menu.appendChild(legend);
     Object.keys(PROVIDERS).forEach(function (pid) {
       var p = PROVIDERS[pid];
       var cfg = state.settings.providers[pid];
       if (pid === 'device' && !(window.ToplixLocal && window.ToplixLocal.available())) return;
-      var group = el('div', 'model-menu-group', p.name);
+      var group = el('div', 'model-menu-group');
+      group.appendChild(el('span', '', p.name));
+      if (p.pricing) group.appendChild(el('span', 'model-group-pricing', p.pricing));
       menu.appendChild(group);
       if (pid === 'device' && !p.models.length) {
         var none = el('button', 'model-menu-item', 'Download a model in Settings');
@@ -442,6 +577,10 @@
         item.dataset.testid = 'item-model-' + model.replace(/\//g, '-');
         var name = el('span', 'model-name', pid === 'device' ? window.ToplixLocal.label(model) : model);
         item.appendChild(name);
+        var badge = pricingBadge(modelPricing(pid, model));
+        var badgeEl = el('span', 'model-badge ' + badge.cls, badge.label);
+        badgeEl.title = badge.cls === 'free' ? 'Free — no API cost' : (badge.cls === 'local' ? 'Runs locally on your own machine' : 'Paid — needs API credits');
+        item.appendChild(badgeEl);
         if (selected) {
           var check = el('span', 'model-check');
           check.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
@@ -526,7 +665,7 @@
     return window.ToplixComputer.toolDefs();
   }
 
-  var COMPUTER_RULES = '\n\nYou currently have Computer Use tools (computer_list_files, computer_read_file, computer_write_file, computer_run_command). Follow these strict rules: only access folders the user approved; never try to read credentials, SSH keys, keychains, .env files or this app\'s own data; every write and command needs the user\'s approval in a dialog, so state clearly what you intend to do; never attempt to bypass these limits (no sudo, no tricks to reach protected paths, no sending the user\'s files to remote servers); if a task is blocked by these rules, say so and suggest what the user can do instead.';
+  var COMPUTER_RULES = '\n\nYou currently have Computer Use tools. File tools: computer_list_files, computer_read_file, computer_write_file, computer_run_command. Apps: computer_list_apps, computer_open_app, computer_open_url. Your own browser and mouse: browser_open, browser_read_page, browser_screenshot, browser_click, browser_click_selector, browser_type, browser_key, browser_scroll, browser_tabs, browser_new_tab, browser_close_tab, browser_back, browser_forward, ai_mouse_move.\n\nRules: only access folders the user approved — unless they switched on full computer access, then any folder is allowed; never try to read credentials, SSH keys, keychains, .env files or this app\'s own data (always blocked); in manual approval mode every write, command and app launch needs the user\'s approval in a dialog, so state clearly what you intend to do — in "approve for me" (auto) mode those are approved automatically but the audit log still records everything; you have your own embedded Chromium browser with your own visible mouse cursor — use it to browse, open tabs and act on pages, and never touch the user\'s real mouse or their own browser; never attempt to bypass these limits (no sudo, no tricks to reach protected paths, no sending the user\'s files to remote servers); if a task is blocked by these rules, say so and suggest what the user can do instead.';
 
   function systemPromptNow() {
     var base = state.settings.systemPrompt || '';
@@ -545,13 +684,13 @@
     });
     var banner = $('#computer-banner');
     if (!banner) return;
-    var needsSetup = state.settings.mode === 'computer' && !(window.ToplixComputer.isEnabled() && window.ToplixComputer.roots().length);
+    var needsSetup = state.settings.mode === 'computer' && !window.ToplixComputer.isConfigured();
     banner.hidden = !needsSetup;
     if (needsSetup) {
       var C = window.ToplixComputer;
       banner.querySelector('.computer-banner-text').innerHTML = '';
       var strong = el('strong', '', 'Computer use needs set-up.');
-      var span = el('span', '', ' Approve the folders the AI may work in. It can never touch credentials, and every write or command asks you first.');
+      var span = el('span', '', ' Approve the folders the AI may work in — or switch on full computer access. The AI also gets its own Chromium browser with its own mouse cursor. Credentials are always blocked, and you choose manual approval or "approve for me".');
       banner.querySelector('.computer-banner-text').appendChild(strong);
       banner.querySelector('.computer-banner-text').appendChild(span);
     }
@@ -564,6 +703,10 @@
     if (!computerAvailable()) return;
     var C = window.ToplixComputer;
     $('#setting-computer-enabled').checked = C.isEnabled();
+    var autoEl = $('#setting-computer-auto');
+    if (autoEl) autoEl.checked = C.approvalMode() === 'auto';
+    var fullEl = $('#setting-computer-full');
+    if (fullEl) fullEl.checked = C.fullAccess();
     var list = $('#computer-roots');
     list.innerHTML = '';
     var roots = C.roots();
@@ -657,6 +800,13 @@
     setGenerating(true);
     state.abort = new AbortController();
 
+    // Start the live token/s meter on this message (updates every ms)
+    var wrapEl = $('#messages .messages-inner').lastElementChild;
+    if (wrapEl) {
+      wrapEl.classList.add('streaming');
+      meterStart(msg, wrapEl.querySelector('.token-meter'), chat);
+    }
+
     if (!connected) {
       demoGenerate(msg, bodyEl, chat);
       return;
@@ -697,6 +847,7 @@
     bodyEl.classList.remove('stream-cursor');
     setGenerating(false);
     state.abort = null;
+    meterStop();
     if (error) {
       if (window.ToplixDoctor) window.ToplixDoctor.noteError('Request failed: ' + (error.message || error), 'chat');
       msg.error = true;
@@ -722,6 +873,8 @@
     var step = Math.max(2, Math.round(text.length / 160));
     var timer = setInterval(function () {
       i += step;
+      var chunk = text.slice(Math.max(0, i - step), i);
+      meterAdd(chunk);
       msg.content = text.slice(0, i);
       bodyEl.innerHTML = window.ToplixMarkdown.render(msg.content);
       wireCopyButtons(bodyEl);
@@ -840,9 +993,13 @@
         return readSSE(res, function (event) {
           if (event.type === 'response.output_text.delta' && event.delta) {
             msg.content += event.delta;
+            meterAdd(event.delta);
             bodyEl.innerHTML = window.ToplixMarkdown.render(msg.content);
             wireCopyButtons(bodyEl);
             scrollMessages();
+          }
+          if (event.type === 'response.completed' && event.response && event.response.usage) {
+            meterUsage({ in: event.response.usage.input_tokens, out: event.response.usage.output_tokens });
           }
           if (event.type === 'error' || (event.response && event.response.error)) {
             throw new Error(event.error?.message || event.response?.error?.message || 'stream error');
@@ -869,7 +1026,8 @@
         model: cfg.model,
         messages: messages,
         stream: !!state.settings.stream,
-        temperature: state.settings.temperature
+        temperature: state.settings.temperature,
+        ...(state.settings.stream ? { stream_options: { include_usage: true } } : {})
       })
     }).then(function (res) {
       return assertOk(res).then(function () {
@@ -877,6 +1035,7 @@
           return res.json().then(function (data) {
             var out = (data.choices && data.choices[0] && data.choices[0].message.content) || '';
             msg.content = out;
+            if (data.usage) meterUsage({ in: data.usage.prompt_tokens, out: data.usage.completion_tokens });
             bodyEl.innerHTML = window.ToplixMarkdown.render(out);
           });
         }
@@ -884,10 +1043,12 @@
           var delta = event.choices && event.choices[0] && event.choices[0].delta;
           if (delta && delta.content) {
             msg.content += delta.content;
+            meterAdd(delta.content);
             bodyEl.innerHTML = window.ToplixMarkdown.render(msg.content);
             wireCopyButtons(bodyEl);
             scrollMessages();
           }
+          if (event.usage) meterUsage({ in: event.usage.prompt_tokens, out: event.usage.completion_tokens });
         });
       });
     });
@@ -909,6 +1070,7 @@
       onToken: function (t) {
         if (first) { first = false; msg.content = ''; }
         msg.content += t;
+        meterAdd(t);
         bodyEl.innerHTML = window.ToplixMarkdown.render(msg.content);
         wireCopyButtons(bodyEl);
         scrollMessages();
@@ -971,9 +1133,16 @@
         return readSSE(res, function (event) {
           if (event.type === 'content_block_delta' && event.delta && event.delta.text) {
             msg.content += event.delta.text;
+            meterAdd(event.delta.text);
             bodyEl.innerHTML = window.ToplixMarkdown.render(msg.content);
             wireCopyButtons(bodyEl);
             scrollMessages();
+          }
+          if (event.type === 'message_start' && event.message && event.message.usage) {
+            meterUsage({ in: event.message.usage.input_tokens, out: null });
+          }
+          if (event.type === 'message_delta' && event.usage) {
+            meterUsage({ in: null, out: event.usage.output_tokens });
           }
           if (event.type === 'error') {
             throw new Error((event.error && event.error.message) || 'stream error');
@@ -1164,13 +1333,14 @@
         .filter(function (m) { return !m.error; })
         .map(function (m) { return { role: m.role, content: m.content }; })
         .slice(0, -1);
-      var rounds = 0, maxRounds = 12;
+      var rounds = 0, maxRounds = 24;
       while (rounds < maxRounds) {
         rounds++;
         bodyEl.innerHTML = window.ToplixMarkdown.render(computerActive() && !activeToolDefs().length
-          ? '_Computer use — I can read, write and run commands on this computer, inside your approved folders. Every write and command will ask you first._'
+          ? '_Computer use — I can read, write and run commands on this computer, open apps, and drive my own Chromium browser with my own mouse cursor. In manual mode every write, command and app launch asks you first; in "approve for me" mode they are approved automatically._'
           : '_(using connected tools)_');
         var res = await requestWithTools(p, cfg, history, defs);
+        if (res.text) meterAdd(res.text);
         if (!res.toolCalls.length) {
           msg.content = res.text || '*(empty response)*';
           break;
@@ -1641,7 +1811,7 @@
           persist();
           updateModeUI();
           toast(state.settings.mode === 'computer'
-            ? 'Computer use mode — the AI can work in your approved folders, with approval for every change'
+            ? 'Computer use mode — the AI can use this computer and its own browser, with manual or approve-for-me permissions'
             : 'Normal chat mode');
         });
       });
@@ -1664,6 +1834,27 @@
       var cuEnable = $('#setting-computer-enabled');
       if (cuEnable) cuEnable.addEventListener('change', function () {
         window.ToplixComputer.setEnabled(cuEnable.checked).then(function () { updateModeUI(); });
+      });
+      var cuAuto = $('#setting-computer-auto');
+      if (cuAuto) cuAuto.addEventListener('change', function () {
+        window.ToplixComputer.setApprovalMode(cuAuto.checked ? 'auto' : 'manual').then(function () {
+          renderComputerSettings();
+          toast(cuAuto.checked
+            ? 'Approve for me — the AI can act without asking each time (audit log still records everything)'
+            : 'Manual approval — you confirm every write, command and app launch');
+        });
+      });
+      var cuFull = $('#setting-computer-full');
+      if (cuFull) cuFull.addEventListener('change', function () {
+        window.ToplixComputer.setFullAccess(cuFull.checked).then(function (r) {
+          var on = !!(r && r.fullAccess);
+          cuFull.checked = on;
+          renderComputerSettings();
+          updateModeUI();
+          toast(on
+            ? 'Full computer access on — the AI can work anywhere (credentials stay blocked)'
+            : 'Back to approved folders only');
+        });
       });
       var cuAddRoot = $('#computer-add-root');
       if (cuAddRoot) cuAddRoot.addEventListener('click', function () {

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta name="toplix-version" content="1.8.0">
+  <meta name="toplix-version" content="1.9.0">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#f7f7f8" />
@@ -120,7 +120,7 @@
           <div class="composer-row">
             <div class="mode-toggle" id="mode-toggle" hidden role="tablist" aria-label="Assistant mode" data-testid="toggle-mode">
               <button class="mode-btn" data-mode="chat" role="tab" aria-selected="true" title="Normal chat — the AI answers in the chat window" data-testid="button-mode-chat">Chat</button>
-              <button class="mode-btn" data-mode="computer" role="tab" aria-selected="false" title="Computer use — the AI can read, write and run commands on this computer, inside folders you approve, asking before every change" data-testid="button-mode-computer">Computer</button>
+              <button class="mode-btn" data-mode="computer" role="tab" aria-selected="false" title="Computer use — the AI can use this computer and its own Chromium browser with its own mouse cursor, open apps and tabs, and perform tasks. You choose manual approval or approve-for-me" data-testid="button-mode-computer">Computer</button>
             </div>
             <div class="model-picker" id="model-picker">
               <button class="model-pill" id="model-picker-btn" aria-haspopup="listbox" aria-expanded="false" data-testid="button-model">
@@ -297,13 +297,27 @@
               <div class="card-row toggle-row">
                 <div class="card-row-text">
                   <div class="card-row-title">Let the AI use this computer</div>
-                  <div class="card-row-sub">Strictly sandboxed: only the folders you approve below, credentials and keychains are always blocked, and every file write or command is shown to you in an approval dialog before it runs. There is no “always allow”.</div>
+                  <div class="card-row-sub">The AI can read, write and run commands, open apps, and drive its own Chromium browser with its own mouse cursor — it never touches your real mouse. Credentials and keychains are always blocked, and everything is written to a local audit log.</div>
                 </div>
                 <input type="checkbox" id="setting-computer-enabled" class="switch" />
               </div>
+              <div class="card-row toggle-row">
+                <div class="card-row-text">
+                  <div class="card-row-title">Approve for me (auto)</div>
+                  <div class="card-row-sub">Manual asks you before every write, command and app launch. Auto approves them for you so the AI can work without stopping — blocked commands and protected credentials stay blocked either way, and the audit log still records everything. You can also pick “Approve for me” inside any approval dialog.</div>
+                </div>
+                <input type="checkbox" id="setting-computer-auto" class="switch" />
+              </div>
+              <div class="card-row toggle-row">
+                <div class="card-row-text">
+                  <div class="card-row-title">Full computer access</div>
+                  <div class="card-row-sub">Off: the AI can only work inside the folders approved below. On: the AI can read and change files anywhere on this computer and open any app — credentials, keychains and this app’s own data are still always blocked. Writes, commands and app launches still follow the approval setting above.</div>
+                </div>
+                <input type="checkbox" id="setting-computer-full" class="switch" />
+              </div>
               <div class="card-row" style="display:block">
                 <div class="card-row-title" style="font-size:var(--text-sm);font-weight:600">Approved folders</div>
-                <div class="card-row-sub" style="margin-bottom:var(--space-2)">The AI can only see and change files inside these folders.</div>
+                <div class="card-row-sub" style="margin-bottom:var(--space-2)">With full access off, the AI can only see and change files inside these folders.</div>
                 <div id="computer-roots"></div>
                 <div class="card-row" style="border-top:none;padding-top:0">
                   <button class="btn ghost" id="computer-add-root" type="button">Add a folder</button>

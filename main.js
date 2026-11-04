@@ -210,16 +210,21 @@ ipcMain.handle('native:secure-remove', (event, key) => {
  *
  * Strict rules enforced by the main process — the renderer cannot relax them:
  *   1. File access is limited to folders the user explicitly approved
- *      (chosen with a native folder picker). Nothing outside is readable.
+ *      (chosen with a native folder picker) — unless "full computer access"
+ *      is switched on by the user, in which case any folder is reachable.
  *   2. Credentials and secrets are always off-limits: SSH/GPG/AWS keys,
  *      keychains, .env files, tokens and this app's own data folder.
  *   3. Every file write and every command is shown to the user in a native
- *      approval dialog and only runs if they click Allow. There is no
- *      "always allow" switch.
+ *      approval dialog and only runs if they click Allow. The user can also
+ *      pick "Approve for me" (auto mode) so the AI can work without stopping —
+ *      they can switch back to manual any time.
  *   4. Commands never run elevated (sudo/doas blocked), destructive and
  *      self-hiding patterns are blocked outright, and every command is
  *      killed after 60 seconds with its output capped.
  *   5. Everything the AI does is written to an audit log on this device.
+ *   6. The AI also gets its own Chromium browser (the "AI Browser") and its
+ *      own visible mouse cursor. The cursor lives inside the AI Browser and
+ *      on the pages it opens — it never moves the user's real mouse.
  */
 
 const CU_FILE = () => path.join(app.getPath('userData'), 'computer-use.json');
@@ -261,32 +266,53 @@ function cuIsProtected(abs) {
   return false;
 }
 
-// Resolve a path the model asked for; it must land inside an approved root.
+// Resolve a path the model asked for; it must land inside an approved root
+// (unless the user switched on full computer access).
 function cuResolve(p) {
   const cfg = cuConfig();
+  if (!cfg.fullAccess) {
   const roots = (cfg.roots || []).map((r) => {
     try { return fs.realpathSync(r); } catch (e) { return path.resolve(r); }
   });
   let abs;
   try { abs = fs.realpathSync(path.resolve(p)); } catch (e) { abs = path.resolve(p); } // new files may not exist yet
   const root = roots.find((r) => abs === r || abs.startsWith(r + path.sep));
-  if (!root) return { ok: false, error: 'That path is outside the folders approved for computer use.' };
+  if (!root) return { ok: false, error: 'That path is outside the folders approved for computer use. Ask the user to add the folder in Settings, or to switch on full computer access.' };
   if (cuIsProtected(abs)) return { ok: false, error: 'That path holds credentials or app data and is never available to computer use.' };
   return { ok: true, abs, root };
+  } // end !fullAccess branch
+  let abs2;
+  try { abs2 = fs.realpathSync(path.resolve(p)); } catch (e) { abs2 = path.resolve(p); }
+  if (cuIsProtected(abs2)) return { ok: false, error: 'That path holds credentials or app data and is never available to computer use.' };
+  return { ok: true, abs: abs2, root: null };
 }
 
+/* Approval gate. Manual mode asks every time (with an "Approve for me"
+ * shortcut that switches to auto mode). Auto mode approves on its own so the
+ * AI can keep working; the audit log still records everything. */
 async function cuApprove(title, detail) {
+  const cfg = cuConfig();
+  if (cfg.approvalMode === 'auto') {
+    cuLog({ tool: 'mode', detail: 'Auto-approved (approve for me): ' + title, allowed: true });
+    return true;
+  }
   if (!win) return false;
   const choice = await dialog.showMessageBox(win, {
     type: 'warning',
     title: 'Computer use — approval needed',
     message: title,
     detail,
-    buttons: ['Allow', 'Deny'],
-    defaultId: 1,
-    cancelId: 1,
+    buttons: ['Allow', 'Approve for me — auto from now on', 'Deny'],
+    defaultId: 2,
+    cancelId: 2,
     noLink: true
   });
+  if (choice.response === 1) {
+    cfg.approvalMode = 'auto';
+    cuWrite(cfg);
+    cuLog({ tool: 'mode', detail: 'Approval mode switched to auto (approve for me)', allowed: true });
+    return true;
+  }
   return choice.response === 0;
 }
 
@@ -429,7 +455,12 @@ ipcMain.handle('apps:launch', (event, name) => {
 
 ipcMain.handle('computer:status', () => {
   const cfg = cuConfig();
-  return { supported: true, enabled: !!cfg.enabled, roots: cfg.roots || [], platform: process.platform };
+  return {
+    supported: true, enabled: !!cfg.enabled, roots: cfg.roots || [], platform: process.platform,
+    approvalMode: cfg.approvalMode === 'auto' ? 'auto' : 'manual',
+    fullAccess: !!cfg.fullAccess,
+    browserOpen: browserTabs().length > 0
+  };
 });
 
 ipcMain.handle('computer:set-enabled', (event, on) => {
@@ -438,6 +469,36 @@ ipcMain.handle('computer:set-enabled', (event, on) => {
   cuWrite(cfg);
   cuLog({ tool: 'mode', detail: on ? 'Computer use turned on' : 'Computer use turned off', allowed: true });
   return { enabled: !!on };
+});
+
+ipcMain.handle('computer:set-approval-mode', (event, mode) => {
+  const cfg = cuConfig();
+  cfg.approvalMode = mode === 'auto' ? 'auto' : 'manual';
+  cuWrite(cfg);
+  cuLog({ tool: 'mode', detail: 'Approval mode: ' + cfg.approvalMode, allowed: true });
+  return { approvalMode: cfg.approvalMode };
+});
+
+ipcMain.handle('computer:set-full-access', async (event, on) => {
+  const cfg = cuConfig();
+  if (on) {
+    // Turning on full computer access is itself a permissioned action
+    const sure = await dialog.showMessageBox(win, {
+      type: 'warning',
+      title: 'Full computer access',
+      message: 'Give the AI full access to this computer?',
+      detail: 'The AI will be able to read and change files anywhere on this computer, and open and use apps — not just inside the folders you approved earlier.\n\nCredentials, SSH keys, keychains, .env files and this app\'s own data are always blocked, whatever you choose. Writes, commands and app launches still follow your approval setting (manual or approve-for-me).',
+      buttons: ['Enable full access', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true
+    });
+    if (sure.response !== 0) return { fullAccess: !!cfg.fullAccess };
+  }
+  cfg.fullAccess = !!on;
+  cuWrite(cfg);
+  cuLog({ tool: 'mode', detail: on ? 'Full computer access ENABLED' : 'Full computer access turned off (approved folders only)', allowed: true });
+  return { fullAccess: !!cfg.fullAccess };
 });
 
 ipcMain.handle('computer:add-root', async () => {
@@ -464,6 +525,147 @@ ipcMain.handle('computer:remove-root', (event, root) => {
 ipcMain.handle('computer:log', () => {
   try { return JSON.parse(fs.readFileSync(CU_LOG(), 'utf8')).slice(-50); } catch (e) { return []; }
 });
+
+/* ---------- AI Browser: an embedded Chromium the assistant can drive ----------
+ *
+ * Every tab is its own BrowserWindow running the app's bundled Chromium.
+ * Each tab gets a transparent, click-through overlay window that follows it
+ * around and draws the AI's OWN mouse cursor — a purple-arrow pointer with an
+ * "AI" badge. The user's real mouse is never moved or captured: the AI's
+ * clicks are injected into the page's webContents, and the cursor the user
+ * sees is just the overlay drawing. Pages the AI opens in new tabs are also
+ * its own; the user's browser is never touched.
+ */
+
+const BROWSER_SEQ = { n: 0 };
+let browserTabsAll = [];        // { id, win, overlay, url, title }
+let browserActiveId = null;
+
+function browserTabs() { return browserTabsAll; }
+function browserActiveTab() {
+  return browserTabsAll.find((t) => t.id === browserActiveId) || browserTabsAll[0] || null;
+}
+
+function browserNormalizeUrl(u) {
+  u = String(u || '').trim();
+  if (!u) return 'https://duckduckgo.com';
+  if (/^https?:\/\//i.test(u)) return u;
+  if (/^[\w-]+(\.[\w-]+)+([/?#]|$)/.test(u) && !/\s/.test(u)) return 'https://' + u;
+  return 'https://duckduckgo.com/?q=' + encodeURIComponent(u);
+}
+
+function browserOverlayHtml() {
+  return 'data:text/html;charset=utf-8,' + encodeURIComponent(
+    '<!doctype html><html><head><meta charset="utf-8"><style>' +
+    'html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;cursor:none}' +
+    '#cursor{position:fixed;left:120px;top:120px;z-index:9999;filter:drop-shadow(0 1px 3px rgba(0,0,0,.35));transition:left .1s cubic-bezier(.2,.7,.3,1),top .1s cubic-bezier(.2,.7,.3,1)}' +
+    '#cursor svg{display:block}' +
+    '#badge{position:fixed;left:140px;top:134px;font:700 9px system-ui,sans-serif;color:#fff;background:#7c5cff;border-radius:6px;padding:1px 4px;z-index:10000;transition:left .1s cubic-bezier(.2,.7,.3,1),top .1s cubic-bezier(.2,.7,.3,1)}' +
+    '#ring{position:fixed;left:0;top:0;width:30px;height:30px;border:2.5px solid #7c5cff;border-radius:50%;opacity:0;transform:translate(-50%,-50%);z-index:9998}' +
+    '@keyframes aiRing{0%{opacity:.95;transform:translate(-50%,-50%) scale(.35)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.9)}}' +
+    '#ring.go{animation:aiRing .55s ease-out}' +
+    '</style></head><body>' +
+    '<div id="cursor"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4.5 2.5l13 7.9-5.6 1.1-2.6 6-4.8-15z" fill="#fff" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/></svg></div>' +
+    '<span id="badge">AI</span><div id="ring"></div>' +
+    '<script>function aiMove(x,y){var c=document.getElementById("cursor");c.style.left=x+"px";c.style.top=y+"px";var b=document.getElementById("badge");b.style.left=(x+18)+"px";b.style.top=(y+13)+"px";}' +
+    'function aiClick(x,y){var r=document.getElementById("ring");r.style.left=x+"px";r.style.top=y+"px";r.classList.remove("go");void r.offsetWidth;r.classList.add("go");}' +
+    'function aiShow(){document.getElementById("cursor").style.display="block";document.getElementById("badge").style.display="block";}' +
+    'function aiHide(){document.getElementById("cursor").style.display="none";document.getElementById("badge").style.display="none";}' +
+    'aiHide();<\/script></body></html>'
+  );
+}
+
+function browserSyncOverlay(tab) {
+  if (!tab.win || tab.overlay.isDestroyed()) return;
+  try {
+    const b = tab.win.getBounds();
+    tab.overlay.setBounds(b);
+    tab.overlay.setVisible(tab.win.isVisible() && tab.win.isFocused());
+  } catch (e) { /* window may be mid-teardown */ }
+}
+
+function browserCreateTab(rawUrl) {
+  const url = browserNormalizeUrl(rawUrl);
+  const id = 'tab' + (++BROWSER_SEQ.n);
+  const content = new BrowserWindow({
+    width: 1100, height: 720, minWidth: 400, minHeight: 300,
+    title: 'AI Browser — ' + id, backgroundColor: '#ffffff', show: false,
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false }
+  });
+  content.loadURL(url);
+
+  const overlay = new BrowserWindow({
+    transparent: true, frame: false, alwaysOnTop: true, focusable: false,
+    skipTaskbar: true, resizable: false, movable: false, minimizable: false, maximizable: false, show: false,
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false }
+  });
+  overlay.setIgnoreMouseEvents(true, { forward: false });
+  overlay.loadURL(browserOverlayHtml());
+
+  const tab = { id, win: content, overlay, url, title: url };
+  browserTabsAll.push(tab);
+  browserActiveId = id;
+
+  // Keep the cursor overlay glued to the page window
+  const sync = () => browserSyncOverlay(tab);
+  content.on('move', sync);
+  content.on('resize', sync);
+  content.on('maximize', sync);
+  content.on('unmaximize', sync);
+  content.on('restore', sync);
+  content.on('show', sync);
+  content.on('focus', sync);
+  content.on('blur', () => { try { tab.overlay.setVisible(false); } catch (e) {} });
+  content.on('page-title-updated', (e, title) => { tab.title = title; });
+  content.webContents.on('did-navigate', (e, u) => { tab.url = u; });
+  content.webContents.on('did-navigate-in-page', (e, u) => { tab.url = u; });
+
+  // Links that open new windows become new AI Browser tabs
+  content.webContents.setWindowOpenHandler(({ url: u }) => {
+    browserCreateTab(u);
+    return { action: 'deny' };
+  });
+
+  content.once('ready-to-show', () => {
+    content.show();
+    sync();
+  });
+  content.on('closed', () => {
+    try { if (!overlay.isDestroyed()) overlay.destroy(); } catch (e) {}
+    browserTabsAll = browserTabsAll.filter((t) => t.id !== id);
+    if (browserActiveId === id) browserActiveId = browserTabsAll.length ? browserTabsAll[browserTabsAll.length - 1].id : null;
+  });
+  cuLog({ tool: 'browser', detail: 'AI Browser tab opened: ' + url, allowed: true });
+  return tab;
+}
+
+async function browserEnsure() {
+  let tab = browserActiveTab();
+  if (!tab || tab.win.isDestroyed()) {
+    tab = browserCreateTab('https://duckduckgo.com');
+    // give the page a moment to start loading so follow-up reads work
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return tab;
+}
+
+function browserCursor(tab, x, y) {
+  if (!tab || tab.overlay.isDestroyed()) return;
+  tab.overlay.webContents.executeJavaScript('aiShow();aiMove(' + Math.round(x) + ',' + Math.round(y) + ');', true).catch(() => {});
+}
+
+async function browserClick(tab, x, y) {
+  if (!tab || tab.win.isDestroyed()) return;
+  tab.win.focus();
+  browserCursor(tab, x, y);
+  const wc = tab.win.webContents;
+  wc.sendInputEvent({ type: 'mouseMove', x: Math.round(x), y: Math.round(y) });
+  wc.sendInputEvent({ type: 'mouseDown', x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 });
+  wc.sendInputEvent({ type: 'mouseUp', x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 });
+  if (!tab.overlay.isDestroyed()) tab.overlay.webContents.executeJavaScript('aiClick(' + Math.round(x) + ',' + Math.round(y) + ');', true).catch(() => {});
+  // small settle time so the page can react before the next tool call
+  await new Promise((r) => setTimeout(r, 250));
+}
 
 ipcMain.handle('computer:call', async (event, tool, args) => {
   const cfg = cuConfig();
@@ -552,6 +754,245 @@ ipcMain.handle('computer:call', async (event, tool, args) => {
     });
     cuLog({ tool, detail: command.slice(0, 200) + ' @ ' + cwdR.abs, allowed: true });
     return result;
+  }
+
+  /* ---------- AI Browser (embedded Chromium) ---------- */
+
+  if (tool === 'browser_open' || tool === 'browser_navigate') {
+    const tab = await browserEnsure();
+    const url = browserNormalizeUrl(args.url);
+    if (tab.url !== url) tab.win.loadURL(url);
+    tab.win.show();
+    cuLog({ tool, detail: url, allowed: true });
+    return { ok: true, result: 'Opened ' + url + ' in the AI Browser (tab ' + tab.id + '). The page is loading — use browser_read_page to read it, browser_screenshot to save a picture, or browser_click / browser_type to act on it with your own mouse cursor.' };
+  }
+
+  if (tool === 'browser_new_tab') {
+    const tab = browserCreateTab(args.url);
+    return { ok: true, result: 'New AI Browser tab ' + tab.id + ' opened at ' + tab.url + '. It is now the active tab.' };
+  }
+
+  if (tool === 'browser_close_tab') {
+    const id = String(args.id || '');
+    const tab = browserTabsAll.find((t) => t.id === id);
+    if (!tab) return { ok: false, error: 'No tab with id ' + id + '. Use browser_tabs to list them.' };
+    tab.win.close();
+    return { ok: true, result: 'Tab ' + id + ' closed.' };
+  }
+
+  if (tool === 'browser_tabs') {
+    if (!browserTabsAll.length) return { ok: true, result: 'No AI Browser tabs are open. Use browser_open to start one.' };
+    return {
+      ok: true,
+      result: 'AI Browser tabs (the one marked active is where clicks and typing go):\n' +
+        browserTabsAll.map((t) => '- ' + t.id + (t.id === browserActiveId ? ' (active)' : '') + ' ' + (t.title || '').slice(0, 80) + ' — ' + t.url).join('\n')
+    };
+  }
+
+  if (tool === 'browser_read_page') {
+    const tab = await browserEnsure();
+    let info;
+    try {
+      const raw = await tab.win.webContents.executeJavaScript(
+        '(function(){var t=document.body?document.body.innerText:"";' +
+        'return JSON.stringify({title:document.title,url:location.href,text:t.slice(0,12000),textLen:t.length,' +
+        'links:Array.prototype.slice.call(document.querySelectorAll("a"),0,40).map(function(a){return (a.innerText||"").trim().slice(0,60)+" -> "+a.href;})});})()',
+        true
+      );
+      info = JSON.parse(raw);
+    } catch (e) {
+      return { ok: false, error: 'Could not read the page (it may still be loading): ' + e.message };
+    }
+    cuLog({ tool, detail: info.url, allowed: true });
+    return {
+      ok: true,
+      result: 'Page: ' + info.title + '\nURL: ' + info.url + '\n\nText (' + info.textLen + ' chars' + (info.textLen > 12000 ? ', first 12000 shown' : '') + '):\n' + (info.text || '(no text)') +
+        (info.links && info.links.length ? '\n\nLinks:\n' + info.links.map((l) => '- ' + l).join('\n') : '')
+    };
+  }
+
+  if (tool === 'browser_screenshot') {
+    const tab = await browserEnsure();
+    try {
+      const img = await tab.win.webContents.capturePage();
+      const dir = path.join(app.getPath('userData'), 'screenshots');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, 'ai-browser-' + Date.now() + '.png');
+      fs.writeFileSync(file, img.toPNG());
+      cuLog({ tool, detail: file, allowed: true });
+      return { ok: true, result: 'Screenshot saved to ' + file + '. The user can open this file to see exactly what the AI Browser shows. Coordinates in the screenshot match the browser_click x/y coordinates.' };
+    } catch (e) {
+      return { ok: false, error: 'Screenshot failed: ' + e.message };
+    }
+  }
+
+  if (tool === 'browser_click' || tool === 'ai_mouse_click') {
+    const tab = await browserEnsure();
+    const x = Number(args.x), y = Number(args.y);
+    if (!isFinite(x) || !isFinite(y)) return { ok: false, error: 'Give numeric x and y coordinates (pixels from the top-left of the AI Browser window). Use browser_screenshot to see where things are.' };
+    await browserClick(tab, x, y);
+    cuLog({ tool, detail: 'click @ ' + x + ',' + y + ' (' + tab.url + ')', allowed: true });
+    return { ok: true, result: 'Clicked at ' + Math.round(x) + ',' + Math.round(y) + ' in the AI Browser with the AI cursor (the user saw the cursor move and a click ripple). Use browser_read_page to see what changed.' };
+  }
+
+  if (tool === 'ai_mouse_move') {
+    const tab = await browserEnsure();
+    const x = Number(args.x), y = Number(args.y);
+    if (!isFinite(x) || !isFinite(y)) return { ok: false, error: 'Give numeric x and y coordinates.' };
+    browserCursor(tab, x, y);
+    tab.win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(x), y: Math.round(y) });
+    return { ok: true, result: 'AI cursor moved to ' + Math.round(x) + ',' + Math.round(y) + '.' };
+  }
+
+  if (tool === 'browser_click_selector') {
+    const tab = await browserEnsure();
+    const sel = String(args.selector || '');
+    if (!sel) return { ok: false, error: 'Give a CSS selector to click, e.g. "button[type=submit]" or "a[href*=login]".' };
+    let pos;
+    try {
+      const raw = await tab.win.webContents.executeJavaScript(
+        '(function(){var el=document.querySelector(' + JSON.stringify(sel) + ');if(!el)return null;el.scrollIntoView({block:"center"});var b=el.getBoundingClientRect();return JSON.stringify({x:b.x+b.width/2,y:b.y+b.height/2});})()',
+        true
+      );
+      pos = raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return { ok: false, error: 'Selector failed: ' + e.message };
+    }
+    if (!pos) return { ok: false, error: 'No element matches "' + sel + '" on this page.' };
+    await browserClick(tab, pos.x, pos.y);
+    cuLog({ tool, detail: sel + ' @ ' + Math.round(pos.x) + ',' + Math.round(pos.y), allowed: true });
+    return { ok: true, result: 'Clicked "' + sel + '" at ' + Math.round(pos.x) + ',' + Math.round(pos.y) + ' with the AI cursor.' };
+  }
+
+  if (tool === 'browser_type' || tool === 'ai_type') {
+    const tab = await browserEnsure();
+    const text = String(args.text == null ? '' : args.text);
+    if (!text) return { ok: false, error: 'Nothing to type — give the text.' };
+    tab.win.focus();
+    tab.win.webContents.insertText(text);
+    cuLog({ tool, detail: 'typed ' + text.length + ' chars (' + tab.url + ')', allowed: true });
+    return { ok: true, result: 'Typed ' + text.length + ' characters into the focused field in the AI Browser.' };
+  }
+
+  if (tool === 'browser_key' || tool === 'ai_key') {
+    const tab = await browserEnsure();
+    const key = String(args.key || 'Enter');
+    tab.win.focus();
+    const wc = tab.win.webContents;
+    wc.sendInputEvent({ type: 'keyDown', keyCode: key });
+    wc.sendInputEvent({ type: 'keyUp', keyCode: key });
+    return { ok: true, result: 'Sent key "' + key + '" to the AI Browser.' };
+  }
+
+  if (tool === 'browser_scroll') {
+    const tab = await browserEnsure();
+    const amount = Math.min(10, Math.max(1, Number(args.amount) || 3));
+    const dir = String(args.direction || 'down') === 'up' ? -1 : 1;
+    const size = tab.win.getContentSize();
+    const x = Math.round((size[0] || 800) / 2), y = Math.round((size[1] || 600) / 2);
+    tab.win.webContents.sendInputEvent({ type: 'mouseWheel', x, y, deltaX: 0, deltaY: dir * amount * 120 });
+    browserCursor(tab, x, y);
+    return { ok: true, result: 'Scrolled ' + (dir === 1 ? 'down' : 'up') + ' by ' + amount + ' notches in the AI Browser.' };
+  }
+
+  if (tool === 'browser_back' || tool === 'browser_forward') {
+    const tab = await browserEnsure();
+    try { tab.win.webContents.navigationHistory[tool === 'browser_back' ? 'goBack' : 'goForward'](); }
+    catch (e) { return { ok: false, error: 'Navigation failed: ' + e.message }; }
+    return { ok: true, result: (tool === 'browser_back' ? 'Went back' : 'Went forward') + ' in the AI Browser.' };
+  }
+
+  /* ---------- Open apps / anything ---------- */
+
+  if (tool === 'computer_open_app') {
+    const name = String(args.name || '').trim();
+    if (!name) return { ok: false, error: 'Give the app name, e.g. "Safari", "Calculator", "VS Code".' };
+    const allowed = await cuApprove(
+      'Open an app',
+      'The assistant wants to open the app "' + name + '" on this computer.'
+    );
+    if (!allowed) { cuLog({ tool, detail: 'open app ' + name + ' (denied)', allowed: false }); return { ok: false, error: 'The user did not allow opening that app.' }; }
+    const launched = await new Promise((resolve) => {
+      try {
+        if (process.platform === 'darwin') {
+          execFile('open', ['-a', name], (err) => resolve({ ok: !err, error: err ? 'No app named "' + name + '" was found. Use computer_list_apps to see what is installed.' : null }));
+        } else if (process.platform === 'win32') {
+          execFile('cmd', ['/d', '/s', '/c', 'start', '', name], { windowsHide: true }, (err) => resolve({ ok: !err, error: err ? 'Could not start "' + name + '". Use computer_list_apps to see what is installed.' : null }));
+        } else {
+          execFile('gtk-launch', [String(name).toLowerCase().replace(/\s+/g, '-')], (err) => {
+            if (!err) return resolve({ ok: true });
+            execFile('sh', ['-c', 'command -v ' + JSON.stringify(name)], (e2, out) => {
+              if (out && out.trim()) return resolve({ ok: true, via: out.trim() });
+              resolve({ ok: false, error: 'Could not find "' + name + '". Use computer_list_apps to see what is installed.' });
+            });
+          });
+        }
+      } catch (e) { resolve({ ok: false, error: e.message }); }
+    });
+    cuLog({ tool, detail: 'open app ' + name + (launched.ok ? '' : ' (failed)'), allowed: true });
+    if (!launched.ok) return { ok: false, error: launched.error };
+    return { ok: true, result: 'App "' + name + '" is opening.' };
+  }
+
+  if (tool === 'computer_list_apps') {
+    const names = new Set();
+    try {
+      const home = app.getPath('home');
+      if (process.platform === 'darwin') {
+        ['/Applications', path.join(home, 'Applications')].forEach((base) => {
+          let list; try { list = fs.readdirSync(base); } catch (e) { return; }
+          list.forEach((n) => { if (/\.app$/i.test(n)) names.add(n.replace(/\.app$/i, '')); });
+        });
+      } else if (process.platform === 'win32') {
+        const roots = [process.env.APPDATA, process.env.ProgramData, process.env['ProgramFiles(x86)']].filter(Boolean);
+        roots.forEach((base) => {
+          const dir = path.join(base, 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+          let stack = [dir];
+          while (stack.length) {
+            const d = stack.pop();
+            let list; try { list = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { continue; }
+            list.forEach((f) => {
+              if (f.isDirectory()) stack.push(path.join(d, f.name));
+              else if (/\.lnk$/i.test(f.name)) names.add(f.name.replace(/\.lnk$/i, ''));
+            });
+          }
+        });
+      } else {
+        const bases = [
+          path.join(home, '.local', 'share', 'applications'),
+          '/usr/share/applications',
+          '/usr/local/share/applications',
+          '/var/lib/flatpak/exports/share/applications'
+        ];
+        bases.forEach((base) => {
+          let list; try { list = fs.readdirSync(base); } catch (e) { return; }
+          list.forEach((f) => { if (/\.desktop$/i.test(f)) names.add(f.replace(/\.desktop$/i, '')); });
+        });
+      }
+    } catch (e) { /* best-effort */ }
+    const sorted = Array.from(names).sort();
+    if (!sorted.length) return { ok: false, error: 'Could not list apps on this system.' };
+    cuLog({ tool, detail: 'listed ' + sorted.length + ' apps', allowed: true });
+    return { ok: true, result: 'Installed apps (use the exact name with computer_open_app):\n' + sorted.slice(0, 400).join('\n') + (sorted.length > 400 ? '\n… truncated at 400 of ' + sorted.length : '') };
+  }
+
+  if (tool === 'computer_open_url') {
+    const url = browserNormalizeUrl(args.url);
+    const where = args.where === 'default' ? 'default' : 'browser';
+    if (where === 'default') {
+      const allowed = await cuApprove(
+        'Open a link in your browser',
+        'The assistant wants to open this link in your default browser (outside the AI Browser):\n' + url
+      );
+      if (!allowed) { cuLog({ tool, detail: url + ' (denied)', allowed: false }); return { ok: false, error: 'The user did not allow opening that link in their browser.' }; }
+      await shell.openExternal(url);
+      cuLog({ tool, detail: url + ' (default browser)', allowed: true });
+      return { ok: true, result: 'Opened ' + url + ' in the user\'s default browser.' };
+    }
+    const tab = await browserEnsure();
+    tab.win.loadURL(url);
+    cuLog({ tool, detail: url + ' (AI Browser)', allowed: true });
+    return { ok: true, result: 'Opened ' + url + ' in the AI Browser.' };
   }
 
   return { ok: false, error: 'Unknown tool: ' + tool };
