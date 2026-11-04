@@ -1,6 +1,9 @@
-Toplix Pro __VERSION__ is now available on macOS, Windows, Linux, Android and iOS.
+Toplix Pro __VERSION__ is now available on macOS, Windows, Linux and Android.
 
 ## What's new
+- Automatic updates: Toplix Pro now asks once whether it should keep itself updated — if you say yes it checks for new versions in the background and updates itself, so you never download an installer again. Windows and Linux install updates with one click; on Mac the download page opens instead (that build cannot swap itself). Change it any time in Settings, Updates.
+- The model brain: every Toplix Pro model now follows one master instruction set (ToplixPro.md) covering how it works, the computer-use playbooks, its browser and mouse, and its safety rules.
+- Computer use fixes: opening and listing apps works again (a routing bug broke every app call), multi-step tool tasks no longer break mid-run on OpenAI-compatible providers, the AI browser waits for pages to load, and page reads now list every clickable element with its coordinates so the AI can click reliably.
 - Custom models: the model picker now has an "Other - type a model name" option, so any OpenAI-compatible endpoint can use any model, not just the built-in suggestions or what the server lists.
 - Run local models: a new Local button next to the model picker opens a dedicated screen that scans your machine for Ollama, LM Studio and Jan, lists their models and connects one with a single click. You can also add a server by address (handy on a phone - use your computer's Wi-Fi address). A "Browse local models" button was added to the Custom provider card in Settings.
 
@@ -10,7 +13,6 @@ Toplix Pro __VERSION__ is now available on macOS, Windows, Linux, Android and iO
 - macOS: the `toplex://` sign-in link now works from the packaged app (the custom URL scheme is registered in the DMG builds), and sign-in callbacks that arrive while the app is still starting are no longer lost.
 - Windows/Linux: same `toplex://` fix, and the single-instance lock is taken before anything else, so a second launch reliably hands the sign-in link to the running app.
 - All devices: streaming responses now parse multi-line server-sent events correctly (some providers were silently dropping chunks), the chat search no longer crashes on older saved chats, and the tool loop can run more rounds so longer agent tasks finish.
-- iPhone and iPad: a new `.ipa` download. Apple requires apps to be signed, so install it with AltStore, SideStore or Sideloadly using your own Apple ID (steps in INSTALL.md). On-device models are not included on iOS yet.
 - Device diagnostics: Settings, Diagnostics (also reachable from the sign-in screens). It checks the internet connection, the device clock, storage, saved settings and chats, key formatting, ChatGPT sign-in, on-device models, the GPU and new releases. It explains each problem in plain words and fixes things only after you review the exact changes and allow them. It also checks quietly at start-up and offers to review serious problems. Reports never include keys or tokens.
 - GPU fixes on Android: the app now declares the phone's OpenCL libraries (needed on Android 12 and later), remembers whether the GPU worked for each model, and detects when a GPU start closed the app. In that case the GPU is switched off automatically and the diagnostics explain it and offer to try again.
 - Android 1.5.x installs update to 1.7.0 without uninstalling.
@@ -24,10 +26,10 @@ Toplix Pro __VERSION__ is now available on macOS, Windows, Linux, Android and iO
 | Linux (any distro) | `Toplix-Pro-__VERSION__-linux-x86_64.AppImage` |
 | Linux (Debian/Ubuntu) | `Toplix-Pro-__VERSION__-linux-amd64.deb` |
 | Android 7.0+ | `Toplix-Pro-__VERSION__-android.apk` |
-| iPhone / iPad (sideload) | `Toplix-Pro-__VERSION__-ios.ipa` |
 
 ## Install notes
 - macOS: open the DMG, drag to Applications. If macOS says the app is damaged: `xattr -dr com.apple.quarantine '/Applications/Toplix Pro.app'`. See INSTALL.md.
 - Windows: run the installer. SmartScreen may warn because the app is unsigned; choose More info, then Run anyway.
+- Updates: from __VERSION__ on, the app keeps itself updated automatically (see What's new) — the installer downloads are only for first installs.
 - Linux: `chmod +x Toplix-Pro-*.AppImage && ./Toplix-Pro-*.AppImage`, or `sudo apt install ./Toplix-Pro-*.deb`.
 - Android: download the APK on your phone, open it and allow installs from your browser or file manager when asked. If you installed 1.4.0 or earlier, uninstall it once first (those builds used a temporary key). From 1.4.1 onward, updates install directly over the existing app.

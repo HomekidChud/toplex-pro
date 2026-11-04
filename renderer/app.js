@@ -1851,6 +1851,41 @@
     // Connect MCP servers on launch
     refreshMcpTools();
 
+    // Automatic updates (desktop only — the group is hidden on the web preview)
+    var upd = window.toplexUpdater;
+    var updGroup = $('#updater-settings-group');
+    if (updGroup && !upd) updGroup.hidden = true;
+    if (upd) {
+      var updaterLine = $('#updater-status-line');
+      var updaterToggle = $('#setting-autoupdate');
+      var renderUpdaterStatus = function (s) {
+        if (!s) return;
+        if (updaterToggle) updaterToggle.checked = !!s.enabled;
+        if (!updaterLine) return;
+        var txt = '';
+        if (s.state && s.state.status === 'ready') txt = 'New version ' + s.state.version + ' downloaded — it installs on the next restart.';
+        else if (s.state && s.state.status === 'downloading') txt = 'Downloading the new version… ' + (s.state.progress || 0) + '%';
+        else if (s.state && s.state.status === 'checking') txt = 'Checking for updates…';
+        else if (s.state && s.state.status === 'mac-download') txt = 'Version ' + s.state.version + ' is available — open the download page (Mac builds cannot update themselves).';
+        else if (s.state && s.state.status === 'error') txt = 'Update check failed: ' + (s.state.error || 'unknown error') + '.';
+        else txt = 'Current version: ' + s.currentVersion + '. ' + (s.enabled ? 'Automatic updates are on.' : 'Automatic updates are off.');
+        updaterLine.textContent = txt;
+      };
+      upd.status().then(renderUpdaterStatus);
+      upd.onState(function () { upd.status().then(renderUpdaterStatus); });
+      if (updaterToggle) updaterToggle.addEventListener('change', function () {
+        upd.setEnabled(updaterToggle.checked).then(renderUpdaterStatus);
+        toast(updaterToggle.checked
+          ? 'Automatic updates on — Toplix Pro updates itself in the background'
+          : 'Automatic updates off — new versions need a manual download');
+      });
+      var updCheckBtn = $('#updater-check-now');
+      if (updCheckBtn) updCheckBtn.addEventListener('click', function () {
+        if (updaterLine) updaterLine.textContent = 'Checking…';
+        upd.checkNow();
+      });
+    }
+
     // Drawer / placeholder / layout adaptation lives in adaptive.js
 
     // Mode toggle: normal chat / computer use (desktop only)
@@ -1915,6 +1950,7 @@
           return window.ToplixComputer.refresh();
         }).then(function () { renderComputerSettings(); updateModeUI(); });
       });
+
       // Reflect the real state from the main process on launch
       window.ToplixComputer.refresh().then(updateModeUI);
     }

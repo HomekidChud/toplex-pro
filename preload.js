@@ -30,6 +30,15 @@ contextBridge.exposeInMainWorld('toplexNative', {
   openExternal: (url) => ipcRenderer.invoke('open-magic-link', url)
 });
 
+// Auto-update: the renderer can read the state, change the always-update
+// choice and trigger a manual check
+contextBridge.exposeInMainWorld('toplexUpdater', {
+  status: () => ipcRenderer.invoke('updater:status'),
+  setEnabled: (on) => ipcRenderer.invoke('updater:set-enabled', on),
+  checkNow: () => ipcRenderer.invoke('updater:check-now'),
+  onState: (handler) => ipcRenderer.on('updater-state', (event, state) => handler(state))
+});
+
 // Computer Use (sandboxed agent mode). All safety rules live in the main
 // process — the renderer can only ask, never relax them.
 contextBridge.exposeInMainWorld('toplexComputer', {

@@ -6,6 +6,7 @@ A fast, focused AI coding assistant for macOS, Windows, Linux, Android and iOS �
 
 ## Features
 
+- **Automatic updates** — the app asks once whether it should keep itself updated; if you say yes it checks for new versions in the background and updates itself (Windows and Linux install with one click, Mac opens the download page). Change it any time in Settings → Updates
 - **Multi-provider models** — connect OpenAI (ChatGPT & Codex models), Anthropic (Claude), OpenRouter, or any OpenAI-compatible endpoint (Ollama, LM Studio, Groq…). The model picker shows a **FREE / PAID / LOCAL** badge on every model and a legend, so free options (on-device models, `:free` OpenRouter variants, GLM flash) are easy to spot
 - **MCP tool servers** — connect Model Context Protocol servers (streamable HTTP) and the model can call their tools mid-conversation, with collapsible tool cards in the chat
 - **Two modes on desktop** — switch between **Chat** (normal chat) and **Computer** (computer use): the AI gets its own Chromium browser with its own visible mouse cursor, can open apps and tabs, read/write files and run commands — under a permission system you control (manual approval or "approve for me", and optional full computer access)

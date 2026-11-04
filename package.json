@@ -19,6 +19,11 @@
   "build": {
     "appId": "com.homekidchud.toplexpro",
     "productName": "Toplix Pro",
+    "publish": {
+      "provider": "github",
+      "owner": "HomekidChud",
+      "repo": "toplex-pro"
+    },
     "protocols": [
       {
         "name": "Toplix Pro sign-in",
@@ -109,5 +114,8 @@
       "artifactName": "Toplix-Pro-${version}-linux-${arch}.${ext}"
     }
   },
-  "homepage": "https://github.com/HomekidChud/toplex-pro"
+  "homepage": "https://github.com/HomekidChud/toplex-pro",
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  }
 }

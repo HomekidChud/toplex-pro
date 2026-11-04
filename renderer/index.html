@@ -291,6 +291,26 @@
             </div>
           </div>
 
+          <div class="card-group" id="updater-settings-group">
+            <div class="card-group-title">Updates</div>
+            <div class="card">
+              <div class="card-row toggle-row">
+                <div class="card-row-text">
+                  <div class="card-row-title">Automatic updates</div>
+                  <div class="card-row-sub">Toplix Pro checks for new versions in the background and updates itself — you never download an installer again. On Mac the download page opens instead (that build can't swap itself).</div>
+                </div>
+                <input type="checkbox" id="setting-autoupdate" class="switch" />
+              </div>
+              <div class="card-row" style="display:block">
+                <div class="card-row-title" style="font-size:var(--text-sm);font-weight:600">Status</div>
+                <div class="card-row-sub" id="updater-status-line">Checking…</div>
+                <div class="card-row" style="border-top:none;padding-top:0">
+                  <button class="btn ghost" id="updater-check-now" type="button">Check for updates now</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="card-group" id="computer-settings-group" hidden>
             <div class="card-group-title">Computer use</div>
             <div class="card">

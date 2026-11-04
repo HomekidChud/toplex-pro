@@ -3,6 +3,7 @@ const { app, BrowserWindow, shell, ipcMain, safeStorage, dialog } = require('ele
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const https = require('https');
 const { spawn } = require('child_process');
 
 let win = null;
@@ -100,6 +101,9 @@ app.whenReady().then(() => {
   // Windows/Linux: a second launch hands us the URL via argv
   const fromArgv = process.argv.find((a) => a.startsWith(PROTOCOL + '://'));
   if (fromArgv) handleAuthUrl(fromArgv);
+
+  // Auto-update: ask once, then keep the app updated in the background
+  updaterInit();
 });
 
 app.on('window-all-closed', () => {
@@ -545,6 +549,168 @@ ipcMain.handle('computer:remove-root', (event, root) => {
 ipcMain.handle('computer:log', () => {
   try { return JSON.parse(fs.readFileSync(CU_LOG(), 'utf8')).slice(-50); } catch (e) { return []; }
 });
+
+/* ---------- Auto-update ----------
+ * The user is asked ONCE whether Toplix Pro should keep itself updated
+ * ("always auto-update"). If they say yes:
+ *   - Windows & Linux: electron-updater checks GitHub releases on launch and
+ *     every 4 hours, downloads the new version in the background, and installs
+ *     it on restart (or on quit). One click, never a manual re-download.
+ *   - macOS: unsigned builds cannot self-install, so the app checks GitHub,
+ *     then offers the download page. (Signed builds would auto-update fully.)
+ * The choice is remembered in update-prefs.json and can be changed any time
+ * in Settings → Behavior.
+ */
+
+const UPDATE_PREFS = () => path.join(app.getPath('userData'), 'update-prefs.json');
+const UPDATER_REPO = 'HomekidChud/toplex-pro';
+const UPDATER_INTERVAL_MS = 4 * 60 * 60 * 1000; // check every 4 hours
+let updaterModule = null;
+try { updaterModule = require('electron-updater'); } catch (e) { /* dev without deps */ }
+// macOS builds are unsigned, so self-install is impossible there — fall back
+// to a check + download-page prompt.
+const UPDATER_CAN_INSTALL = process.platform !== 'darwin';
+
+function updaterPrefs() {
+  try { return JSON.parse(fs.readFileSync(UPDATE_PREFS(), 'utf8')); } catch (e) { return { enabled: null }; }
+}
+function updaterWritePrefs(p) {
+  try { fs.writeFileSync(UPDATE_PREFS(), JSON.stringify(p, null, 2), { mode: 0o600 }); } catch (e) { /* ignore */ }
+}
+
+let updaterState = { status: 'idle', version: null, error: null, progress: 0 }; // idle|checking|downloading|ready|none|error|mac-download
+let updaterAsked = false;
+
+function updaterBroadcast() {
+  if (win && rendererReady) { try { win.webContents.send('updater-state', updaterState); } catch (e) {} }
+}
+
+function updaterCheckMacFallback() {
+  // No signing → we cannot swap the .app ourselves. Check GitHub for a newer
+  // release and, if found, offer to open the download page.
+  https.get({
+    hostname: 'api.github.com',
+    path: '/repos/' + UPDATER_REPO + '/releases/latest',
+    headers: { 'User-Agent': 'ToplixPro-Updater', Accept: 'application/vnd.github+json' },
+    timeout: 10000
+  }, (res) => {
+    let body = '';
+    res.on('data', (d) => { body += d; });
+    res.on('end', () => {
+      try {
+        const rel = JSON.parse(body);
+        const remote = String(rel.tag_name || '').replace(/^v/, '');
+        const local = app.getVersion();
+        if (rel && remote && remote !== local) {
+          updaterState = { status: 'mac-download', version: remote, error: null, progress: 0 };
+          updaterBroadcast();
+          if (win) {
+            dialog.showMessageBox(win, {
+              type: 'info',
+              title: 'Update available',
+              message: 'Toplix Pro ' + remote + ' is available.',
+              detail: 'This Mac build cannot update itself in place (it is not code-signed), so the download page will open — or choose Later and keep using ' + local + '.',
+              buttons: ['Open download page', 'Later'], defaultId: 0, cancelId: 1, noLink: true
+            }).then((r) => { if (r.response === 0) shell.openExternal(rel.html_url || ('https://github.com/' + UPDATER_REPO + '/releases/latest')); });
+          }
+        } else {
+          updaterState = { status: 'none', version: null, error: null, progress: 0 };
+          updaterBroadcast();
+        }
+      } catch (e) { /* bad response — ignore */ }
+    });
+  }).on('error', () => { /* offline — ignore */ });
+}
+
+function updaterCheck() {
+  if (!updaterModule) return;
+  if (!UPDATER_CAN_INSTALL) return updaterCheckMacFallback();
+  updaterState = { status: 'checking', version: null, error: null, progress: 0 };
+  updaterBroadcast();
+  try {
+    const autoUpdater = updaterModule.autoUpdater;
+    autoUpdater.checkForUpdates().catch((e) => {
+      updaterState = { status: 'error', error: String(e && e.message || e), progress: 0 };
+      updaterBroadcast();
+    });
+  } catch (e) { /* dev environment — ignore */ }
+}
+
+function updaterInit() {
+  if (!updaterModule) return;
+  if (UPDATER_CAN_INSTALL) {
+    const autoUpdater = updaterModule.autoUpdater;
+    autoUpdater.autoDownload = true;        // download new versions silently
+    autoUpdater.autoInstallOnAppQuit = true; // apply them the next time the app quits
+    autoUpdater.on('checking-for-update', () => { updaterState = { status: 'checking', version: null, error: null, progress: 0 }; updaterBroadcast(); });
+    autoUpdater.on('update-available', (i) => { updaterState = { status: 'downloading', version: i && i.version, error: null, progress: 0 }; updaterBroadcast(); });
+    autoUpdater.on('update-not-available', () => { updaterState = { status: 'none', version: null, error: null, progress: 0 }; updaterBroadcast(); });
+    autoUpdater.on('download-progress', (p) => { updaterState = { status: 'downloading', version: updaterState.version, error: null, progress: Math.round((p && p.percent) || 0) }; updaterBroadcast(); });
+    autoUpdater.on('update-downloaded', (i) => {
+      updaterState = { status: 'ready', version: i && i.version, error: null, progress: 100 };
+      updaterBroadcast();
+      // One click to finish — never a manual download again. "Later" still
+      // applies it automatically on the next quit.
+      if (win) {
+        dialog.showMessageBox(win, {
+          type: 'info',
+          title: 'Update ready',
+          message: 'Toplix Pro ' + (i && i.version) + ' is downloaded and ready.',
+          detail: 'Restart now to finish updating. If you pick Later, the new version is applied automatically the next time you quit the app.',
+          buttons: ['Restart now', 'Later'], defaultId: 0, cancelId: 1, noLink: true
+        }).then((r) => { if (r.response === 0) autoUpdater.quitAndInstall(); });
+      }
+    });
+    autoUpdater.on('error', (e) => {
+      updaterState = { status: 'error', error: String(e && e.message || e), progress: 0 };
+      updaterBroadcast();
+    });
+  }
+
+  // Ask once: "always auto-update?" — then remember the choice forever.
+  const prefs = updaterPrefs();
+  if (prefs.enabled === null || prefs.enabled === undefined) {
+    setTimeout(() => {
+      if (updaterAsked || !win) return;
+      updaterAsked = true;
+      dialog.showMessageBox(win, {
+        type: 'question',
+        title: 'Automatic updates',
+        message: 'Keep Toplix Pro automatically updated?',
+        detail: 'Toplix Pro would check for new versions in the background and update itself — you never download an installer again.\n\nYou can change this any time in Settings → Behavior.',
+        buttons: ['Always auto-update', 'No, update manually'], defaultId: 0, cancelId: 1, noLink: true
+      }).then((r) => {
+        const on = r.response === 0;
+        updaterWritePrefs({ enabled: on });
+        if (on) updaterCheck();
+      });
+    }, 4000); // let the window settle before asking
+  } else if (prefs.enabled) {
+    updaterCheck();
+    setInterval(updaterCheck, UPDATER_INTERVAL_MS);
+  }
+}
+
+ipcMain.handle('updater:status', () => {
+  const prefs = updaterPrefs();
+  return {
+    enabled: prefs.enabled === true,
+    asked: prefs.enabled !== null && prefs.enabled !== undefined,
+    state: updaterState,
+    canInstall: UPDATER_CAN_INSTALL,
+    currentVersion: app.getVersion()
+  };
+});
+let updaterTimer = null;
+ipcMain.handle('updater:set-enabled', (event, on) => {
+  updaterWritePrefs({ enabled: !!on });
+  if (on) {
+    if (!updaterTimer) updaterTimer = setInterval(updaterCheck, UPDATER_INTERVAL_MS);
+    updaterCheck();
+  }
+  return { enabled: !!on };
+});
+ipcMain.handle('updater:check-now', () => { updaterCheck(); return { ok: true }; });
 
 /* ---------- AI Browser: an embedded Chromium the assistant can drive ----------
  *
