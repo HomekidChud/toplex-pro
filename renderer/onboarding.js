@@ -181,12 +181,13 @@
       chatgpt.disabled = true;
       var wait = el('div', 'gate-waiting');
       wait.appendChild(el('span', 'gate-spinner'));
-      wait.appendChild(el('span', '', 'Waiting for you to finish in the browser\u2026'));
+      var waitMsg = el('span', '', 'Waiting for you to finish in the browser\u2026');
+      wait.appendChild(waitMsg);
       var cancel = el('button', 'link-btn', 'Cancel');
       cancel.addEventListener('click', function () { try { native.loopbackStop(); } catch (e) { /* ignore */ } });
       wait.appendChild(cancel);
       panel.innerHTML = ''; panel.appendChild(wait); panel.hidden = false;
-      window.ToplixSIWC.signIn().then(function () {
+      window.ToplixSIWC.signIn(function (m) { waitMsg.textContent = m; }).then(function () {
         finish('Signed in with ChatGPT');
       }).catch(function (e) {
         panel.hidden = true; chatgpt.disabled = false;

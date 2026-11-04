@@ -221,7 +221,9 @@ public class ToplixNativePlugin extends Plugin {
                         r.put("text", resp.body() != null ? resp.body().string() : "");
                         call.resolve(r);
                         return;
-                    } catch (java.net.UnknownHostException | java.net.SocketTimeoutException | java.net.ConnectException e) {
+                    } catch (java.net.UnknownHostException | java.net.ConnectException e) {
+                        // Only failures that happen before the request is sent are retried, so a
+                        // one-time sign-in code is never submitted twice.
                         last = e;
                         try { Thread.sleep(800L * (attempt + 1)); } catch (InterruptedException ie) { break; }
                     }

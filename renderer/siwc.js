@@ -107,9 +107,13 @@
   }
 
   /* ---------- sign in ---------- */
-  function signIn() {
+  function signIn(onStatus) { return attemptSignIn(null, 1, onStatus); }
+
+  // OpenAI's documented recovery for invalid_grant on the code exchange: discard the code and
+  // start a fresh authorization that reuses the client ID issued during this attempt.
+  function attemptSignIn(preset, retries, onStatus) {
     if (!N || !N.available) return Promise.reject(new Error('Sign in with ChatGPT needs the Toplix Pro app (desktop or Android).'));
-    var verifier = rand(48), state = rand(24), nonce = rand(24), redirect, saved = session;
+    var verifier = rand(48), state = rand(24), nonce = rand(24), redirect, saved = preset || session, retryClient = null;
 
     return (saved ? Promise.resolve(saved) : N.secureGet(REC_KEY).then(function (raw) { try { return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }))
       .then(function (rec) { saved = rec; return N.loopbackStart(1455); })
@@ -152,6 +156,9 @@
         return request('POST', TOKEN, {
           grant_type: 'authorization_code', client_id: clientId, code: p.get('code'),
           code_verifier: verifier, redirect_uri: redirect, resource: RESOURCE
+        }).catch(function (e) {
+          if (e.code === 'invalid_grant' && retries > 0) retryClient = clientId;
+          throw e;
         }).then(function (tok) {
           if (!tok.id_token) throw new Error('No ID token returned');
           return validateIdToken(tok.id_token, clientId, nonce).then(function (claims) {
@@ -174,7 +181,18 @@
         session = rec;
         return save().then(function () { emit(); return session; });
       })
-      .catch(function (e) { try { N.loopbackStop(); } catch (x) { /* ignore */ } throw e; });
+      .catch(function (e) {
+        try { N.loopbackStop(); } catch (x) { /* ignore */ }
+        if (retryClient) {
+          if (onStatus) { try { onStatus('ChatGPT asked for one more confirmation. Finish it in your browser.'); } catch (x) { /* ignore */ } }
+          return attemptSignIn(Object.assign({}, saved || {}, { client_id: retryClient }), retries - 1, onStatus);
+        }
+        if (e.code === 'invalid_grant') {
+          var err = new Error('ChatGPT rejected the sign-in code (invalid_grant) twice. Keep Toplix Pro open until it says you are signed in, finish the browser step within a minute, and try again. If it keeps failing, use an API key instead.');
+          err.code = 'invalid_grant'; throw err;
+        }
+        throw e;
+      });
   }
 
   function planError() {

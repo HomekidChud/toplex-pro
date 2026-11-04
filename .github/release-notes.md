@@ -1,9 +1,10 @@
 Toplix Pro __VERSION__ is now available on macOS, Windows, Linux and Android.
 
 ## What's new
-- Android updates now install over the old version. The APK is signed with a permanent key and the version number always increases, so you no longer need to uninstall first.
-- Sign-in network calls are more reliable: automatic retries, and a DNS-over-HTTPS fallback when the phone cannot resolve auth.openai.com. A clearer message is shown if the phone is genuinely offline.
-- First-run permissions and required sign-in (ChatGPT plan, Claude via API key, or any provider key) from 1.4.0 carry over.
+- Fixes the ChatGPT sign-in `invalid_grant` error. If ChatGPT rejects the first sign-in code, Toplix Pro now follows OpenAI's documented recovery: it discards the code and automatically starts one more authorization with the client ID issued to your app, then tells you to confirm again in the browser.
+- The Android network layer never resubmits a one-time sign-in code after a timeout.
+- If it still fails, the message now explains what to do instead of showing a bare error code.
+- Android updates install over the old version since 1.4.1 (permanent signing key). Sign-in network retries and DNS fallback from 1.4.1 carry over.
 
 ## Downloads
 | Device | File |
