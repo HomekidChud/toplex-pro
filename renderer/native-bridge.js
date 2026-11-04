@@ -23,8 +23,12 @@
       secureSet: function (k, v) { return electron.secureSet(k, v); },
       secureRemove: function (k) { return electron.secureRemove(k); },
       openExternal: function (u) { return electron.openExternal(u); },
-      detectApps: function () { return Promise.resolve({ chatgpt: false, claude: false }); },
-      launchApp: function () { return Promise.reject(new Error('Not available on desktop')); }
+      detectApps: function () {
+        return window.toplexApps ? window.toplexApps.detect() : Promise.resolve({ chatgpt: false, claude: false, cowork: false });
+      },
+      launchApp: function (app) {
+        return window.toplexApps ? window.toplexApps.launch(app) : Promise.reject(new Error('Not available'));
+      }
     };
   } else if (cap) {
     api = {

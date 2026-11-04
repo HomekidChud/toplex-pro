@@ -31,3 +31,9 @@ contextBridge.exposeInMainWorld('toplexComputer', {
   log: () => ipcRenderer.invoke('computer:log'),
   call: (tool, args) => ipcRenderer.invoke('computer:call', tool, args)
 });
+
+// Installed desktop apps (ChatGPT with Cowork, Claude 2.0) — presence check only
+contextBridge.exposeInMainWorld('toplexApps', {
+  detect: () => ipcRenderer.invoke('apps:detect'),
+  launch: (name) => ipcRenderer.invoke('apps:launch', name)
+});

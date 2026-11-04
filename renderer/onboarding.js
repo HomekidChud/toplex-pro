@@ -8,7 +8,8 @@
   var CONSENT_KEY = 'toplex.consent';
   var ONBOARDED_KEY = 'toplex.onboarded';
   var CONSENT_VERSION = 1;
-  var gate, app, apps = { chatgpt: false, claude: false };
+  var gate, app, apps = { chatgpt: false, claude: false, cowork: false };
+  var autoTried = false;   // auto-connect (installed apps) runs once per gate
 
   function $(sel, root) { return (root || document).querySelector(sel); }
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
@@ -84,7 +85,8 @@
   /* ---------- Step 1: permissions ---------- */
   function showPermissions() {
     lock(true);
-    var onAndroid = N().shell === 'android' || N().shell === 'ios';
+    var onMobile = N().shell === 'android' || N().shell === 'ios';
+    var onDesktop = N().shell === 'electron';
     var card = shell('Before you start', 'Toplix Pro needs your permission for the following. You can change this later in Settings.');
 
     var net = toggle(true, true);
@@ -92,10 +94,13 @@
       'Sends your messages directly to the AI provider you pick (OpenAI, Anthropic, OpenRouter, Zhipu or your own endpoint) and contacts auth.openai.com to sign in. Nothing is routed through Toplix servers.', net));
 
     var detect = null;
-    if (onAndroid) {
+    if (onMobile || onDesktop) {
       detect = toggle(true, false);
-      card.appendChild(row(ICON.apps, 'Look for ChatGPT and Claude on this phone',
-        'A simple installed-or-not check, used to suggest the right sign-in. Nothing is read from those apps.', detect));
+      card.appendChild(row(ICON.apps,
+        onDesktop ? 'Look for ChatGPT (Cowork) and Claude 2.0 on this computer' : 'Look for ChatGPT and Claude on this phone',
+        onDesktop
+          ? 'A simple installed-or-not check. If they are installed, Toplix Pro takes you straight to connecting them. Nothing is read from those apps.'
+          : 'A simple installed-or-not check, used to suggest the right sign-in. Nothing is read from those apps.', detect));
     }
 
     card.appendChild(row(ICON.shield, 'What we never do',
@@ -155,8 +160,10 @@
     // ChatGPT
     var chatgpt = providerCard({
       cls: 'chatgpt', mark: 'G', title: 'Continue with ChatGPT',
-      badge: consent.detectApps && apps.chatgpt ? 'App installed' : '',
-      sub: native.available ? 'Use your ChatGPT plan. You\u2019ll approve access in your browser.' : 'Available in the desktop and Android apps.',
+      badge: consent.detectApps && apps.chatgpt ? (apps.cowork ? 'Cowork installed' : 'App installed') : '',
+      sub: (consent.detectApps && apps.chatgpt && apps.cowork)
+        ? 'ChatGPT with Cowork is installed on this computer. Approve access in your browser — you are likely already signed in there — and Toplix Pro connects automatically.'
+        : (native.available ? 'Use your ChatGPT plan. You\u2019ll approve access in your browser.' : 'Available in the desktop and Android apps.'),
       disabled: !native.available
     });
     card.appendChild(chatgpt);
@@ -164,8 +171,10 @@
     // Claude
     var claude = providerCard({
       cls: 'claude', mark: 'C', title: 'Continue with Claude',
-      badge: consent.detectApps && apps.claude ? 'App installed' : '',
-      sub: 'Anthropic connects third-party apps with an API key from Console.'
+      badge: consent.detectApps && apps.claude ? 'Claude 2.0 installed' : '',
+      sub: (consent.detectApps && apps.claude)
+        ? 'Claude 2.0 is installed on this computer. Anthropic connects third-party apps with an API key, so paste one to connect.'
+        : 'Anthropic connects third-party apps with an API key from Console.'
     });
     card.appendChild(claude);
 
@@ -289,9 +298,26 @@
     }
 
     claude.addEventListener('click', function () {
-      keyPanel('anthropic', 'Anthropic doesn\u2019t allow third-party apps to sign in with a Claude account, so Toplix Pro connects to Claude with an API key. Your usage is billed to that key.');
+      keyPanel('anthropic', (apps.claude ? 'Claude 2.0 is installed on this computer, so Claude is preselected. ' : '')
+        + 'Anthropic doesn\u2019t allow third-party apps to sign in with a Claude account, so Toplix Pro connects to Claude with an API key. Your usage is billed to that key.');
     });
     keyBtn.addEventListener('click', function () { keyPanel(prefill || 'openai'); });
+
+    // Auto-connect when the ChatGPT (Cowork) or Claude 2.0 apps are installed:
+    // ChatGPT starts its one-approval browser sign-in, Claude opens the API key
+    // panel with Claude preselected. If neither is installed, the user signs in
+    // as usual. Runs once per gate.
+    if (consent.detectApps && !autoTried && !hasCredential()) {
+      if (apps.chatgpt) {
+        autoTried = true;
+        var autoNote = el('p', 'gate-hint', 'ChatGPT with Cowork is installed on this computer — connecting it now. Finish the approval in your browser.');
+        card.insertBefore(autoNote, chatgpt.nextSibling);
+        setTimeout(function () { chatgpt.click(); }, 700);
+      } else if (apps.claude) {
+        autoTried = true;
+        claude.click();
+      }
+    }
   }
 
   // Reject only when the provider clearly says the key is bad; stay permissive on network errors.
@@ -317,7 +343,7 @@
     if (!consent || consent.v !== CONSENT_VERSION) return showPermissions();
     var detect = consent.detectApps && N().detectApps ? N().detectApps().catch(function () { return {}; }) : Promise.resolve({});
     detect.then(function (r) {
-      apps = { chatgpt: !!r.chatgpt, claude: !!r.claude };
+      apps = { chatgpt: !!r.chatgpt, claude: !!r.claude, cowork: !!r.cowork };
       if (hasCredential()) return lock(false);
       showSignIn();
     });

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta name="toplix-version" content="1.7.0">
+  <meta name="toplix-version" content="1.7.1">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#f7f7f8" />
@@ -222,6 +222,17 @@
             </div>
           </div>
 
+          <div class="card-group" id="desktop-apps-group" hidden>
+            <div class="card-group-title">Apps on this computer</div>
+            <div class="card">
+              <div class="card-row" style="display:block">
+                <div class="card-row-sub">Toplix Pro checks whether the ChatGPT (Cowork) and Claude 2.0 apps are installed. If they are, sign-in connects them straight away — nothing is read from those apps.</div>
+              </div>
+              <div class="card-row" id="app-row-chatgpt"></div>
+              <div class="card-row" id="app-row-claude"></div>
+            </div>
+          </div>
+
           <div class="card-group">
             <div class="card-group-title">MCP tool servers</div>
             <div class="card">
@@ -329,7 +340,7 @@
         <section class="settings-pane" data-pane="about">
           <div class="about-block">
             <div class="brand about-brand"><span class="brand-mark" aria-hidden="true">T</span><span class="brand-name">Toplix <em>Pro</em></span></div>
-            <p>Version 1.7.0 · macOS, Windows, Linux, Android, iOS</p>
+            <p>Version 1.7.1 · macOS, Windows, Linux, Android, iOS</p>
             <p>A focused AI coding assistant built with Electron, in the spirit of T3 Code. Your chats and API keys never leave your machine.</p>
             <p class="about-license">© 2026 HomekidChud. All rights reserved. See LICENSE for terms.</p>
           </div>

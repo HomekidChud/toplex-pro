@@ -1,6 +1,8 @@
 Toplix Pro __VERSION__ is now available on macOS, Windows, Linux, Android and iOS.
 
 ## What's new
+- Desktop app detection: on the sign-in screen Toplix Pro now checks whether ChatGPT (with Cowork) and Claude 2.0 are installed on your computer. If ChatGPT is there, it starts connecting straight away - you just finish the one approval in your browser. If Claude 2.0 is there, the Claude option comes preselected with its API key panel. Neither installed? The normal sign-in appears. Settings, Connectors shows what was found, with Open app buttons. Nothing is ever read from those apps - only their presence is checked.
+
 - Two modes on desktop: a Chat / Computer toggle in the composer. Chat is the normal assistant. Computer (computer use) lets the AI read, write and run commands on your computer — but only inside folders you approve, never near credentials (SSH keys, keychains, .env, tokens are always blocked), and every file write or command is shown in an approval dialog before it runs. Commands can't run elevated, destructive ones are blocked, they are killed after 60 seconds, and everything is written to a local audit log. Manage approved folders in Settings, Behavior, Computer use.
 - macOS: the `toplex://` sign-in link now works from the packaged app (the custom URL scheme is registered in the DMG builds), and sign-in callbacks that arrive while the app is still starting are no longer lost.
 - Windows/Linux: same `toplex://` fix, and the single-instance lock is taken before anything else, so a second launch reliably hands the sign-in link to the running app.

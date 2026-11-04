@@ -310,6 +310,123 @@ function cuCommandBlocked(command) {
   return CU_BLOCKED_COMMANDS.find((re) => re.test(c));
 }
 
+/* ---------- Installed desktop apps: ChatGPT (Cowork) & Claude 2.0 ----------
+ * Detects whether the official ChatGPT and Claude desktop apps are installed
+ * so the sign-in flow can auto-connect instead of asking the user to choose.
+ * Nothing is read from those apps — only their presence on disk is checked.
+ */
+const { execFile } = require('child_process');
+
+function dirExists(p) { try { fs.accessSync(p); return true; } catch (e) { return false; } }
+
+function detectMacApps() {
+  const found = { chatgpt: false, claude: false, cowork: false };
+  const bases = ['/Applications', path.join(app.getPath('home'), 'Applications')];
+  for (const base of bases) {
+    let names;
+    try { names = fs.readdirSync(base); } catch (e) { continue; }
+    for (const n of names) {
+      if (/^ChatGPT\.app$/i.test(n)) { found.chatgpt = true; found.cowork = true; }
+      if (/^Claude( [\d.]+)?\.app$/i.test(n)) found.claude = true;
+    }
+  }
+  return found;
+}
+
+function detectLinuxApps() {
+  const found = { chatgpt: false, claude: false, cowork: false };
+  const bases = [
+    path.join(app.getPath('home'), '.local', 'share', 'applications'),
+    '/usr/share/applications',
+    '/var/lib/flatpak/exports/share/applications',
+    path.join(app.getPath('home'), '.local', 'share', 'flatpak', 'exports', 'share', 'applications')
+  ];
+  for (const base of bases) {
+    let files;
+    try { files = fs.readdirSync(base); } catch (e) { continue; }
+    for (const f of files) {
+      if (/^(chatgpt|com\.openai\.chat)/i.test(f)) { found.chatgpt = true; found.cowork = true; }
+      if (/^(claude|com\.anthropic\.claude)/i.test(f)) found.claude = true;
+    }
+  }
+  return found;
+}
+
+function detectWinApps() {
+  const found = { chatgpt: false, claude: false, cowork: false };
+  const local = process.env.LOCALAPPDATA || '';
+  const pfs = [process.env.ProgramFiles || 'C:\\Program Files', process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'];
+  const chatgptDirs = [path.join(local, 'Programs', 'ChatGPT'), path.join(pfs[0], 'ChatGPT'), path.join(pfs[1], 'ChatGPT')];
+  const claudeDirs = [path.join(local, 'AnthropicClaude'), path.join(local, 'Programs', 'Claude'), path.join(pfs[0], 'Claude')];
+  for (const d of chatgptDirs) if (dirExists(d)) { found.chatgpt = true; found.cowork = true; break; }
+  for (const d of claudeDirs) if (dirExists(d)) { found.claude = true; break; }
+  return found;
+}
+
+function winRegistryHas(displayName) {
+  // Best-effort check of the uninstall list for the app's display name
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    const roots = ['HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'];
+    let left = roots.length;
+    roots.forEach((root) => {
+      execFile('reg', ['query', root, '/s', '/f', displayName, '/d'], { windowsHide: true, timeout: 8000 }, (err, stdout) => {
+        if (stdout && new RegExp(displayName, 'i').test(stdout)) finish(true);
+        if (--left === 0) finish(false);
+      });
+    });
+    setTimeout(() => finish(false), 10000);
+  });
+}
+
+async function detectInstalledApps() {
+  let found = { chatgpt: false, claude: false, cowork: false };
+  try {
+    if (process.platform === 'darwin') found = detectMacApps();
+    else if (process.platform === 'win32') found = detectWinApps();
+    else found = detectLinuxApps();
+    if (process.platform === 'win32') {
+      // The ChatGPT Windows app can install through the Store, which leaves no
+      // folder — fall back to the registry's uninstall list.
+      if (!found.chatgpt && await winRegistryHas('ChatGPT')) { found.chatgpt = true; found.cowork = true; }
+      if (!found.claude && await winRegistryHas('Claude')) found.claude = true;
+    }
+  } catch (e) { /* detection is best-effort */ }
+  found.platform = process.platform;
+  return found;
+}
+
+ipcMain.handle('apps:detect', () => detectInstalledApps());
+
+ipcMain.handle('apps:launch', (event, name) => {
+  const target = String(name || '').toLowerCase() === 'claude' ? 'claude' : 'chatgpt';
+  return new Promise((resolve) => {
+    try {
+      if (process.platform === 'darwin') {
+        const appName = target === 'claude' ? 'Claude' : 'ChatGPT';
+        execFile('open', ['-a', appName], (err) => resolve({ ok: !err }));
+      } else if (process.platform === 'win32') {
+        const local = process.env.LOCALAPPDATA || '';
+        const candidates = target === 'claude'
+          ? [path.join(local, 'AnthropicClaude', 'claude.exe'), path.join(local, 'Programs', 'Claude', 'Claude.exe')]
+          : [path.join(local, 'Programs', 'ChatGPT', 'ChatGPT.exe')];
+        const exe = candidates.find((c) => dirExists(c));
+        if (!exe) return resolve({ ok: false, error: 'Could not find the app.' });
+        const child = spawn(exe, [], { detached: true, stdio: 'ignore', windowsHide: true });
+        child.unref();
+        resolve({ ok: true });
+      } else if (process.platform === 'linux') {
+        execFile('gtk-launch', [target === 'claude' ? 'claude' : 'chatgpt'], (err) => resolve({ ok: !err }));
+      } else {
+        resolve({ ok: false, error: 'Not supported on this system.' });
+      }
+    } catch (e) {
+      resolve({ ok: false, error: e.message });
+    }
+  });
+});
+
 ipcMain.handle('computer:status', () => {
   const cfg = cuConfig();
   return { supported: true, enabled: !!cfg.enabled, roots: cfg.roots || [], platform: process.platform };

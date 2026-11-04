@@ -1274,6 +1274,36 @@
     }
   }
 
+  /* ---------------- Desktop apps (ChatGPT / Cowork, Claude 2.0) ---------------- */
+  function renderDesktopApps() {
+    var group = $('#desktop-apps-group');
+    if (!group) return;
+    var n = window.ToplixNative;
+    var desktop = !!(n && n.available && n.shell === 'electron');
+    group.hidden = !desktop;
+    if (!desktop) return;
+    n.detectApps().then(function (apps) {
+      apps = apps || {};
+      function row(id, name, sub, installed) {
+        var host = $('#app-row-' + id);
+        if (!host) return;
+        host.innerHTML = '';
+        var text = el('div', 'card-row-text');
+        text.appendChild(el('div', 'card-row-title', name));
+        text.appendChild(el('div', 'card-row-sub', installed ? (sub + ' — installed') : 'Not found on this computer'));
+        host.appendChild(text);
+        if (installed) {
+          var open = el('button', 'btn ghost', 'Open app');
+          open.type = 'button';
+          open.addEventListener('click', function () { n.launchApp(id).catch(function () {}); });
+          host.appendChild(open);
+        }
+      }
+      row('chatgpt', 'ChatGPT (Cowork)', apps.chatgpt ? 'Cowork included' : 'ChatGPT', !!apps.chatgpt);
+      row('claude', 'Claude', 'Claude 2.0', !!apps.claude);
+    }).catch(function () { /* detection is best-effort */ });
+  }
+
   /* ---------------- Settings modal ---------------- */
   function openSettings() {
     // build provider cards
@@ -1374,6 +1404,7 @@
     $('#setting-dark').checked = currentTheme() === 'dark';
     updateChatGptStatus();
     renderMcpSettings();
+    renderDesktopApps();
     renderComputerSettings();
     updateModeUI();
     $('#setting-system').value = state.settings.systemPrompt;
